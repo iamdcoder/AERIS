@@ -14,6 +14,9 @@ from copilot.agent.reassessment import CandidateReassessor
 from .investigation_quality import (
     InvestigationQuality,
 )
+from copilot.agent.decision_lifecycle import (
+    DecisionLifecycleController,
+)
 from .planner import (
     NoFeasibleCandidateError,
     feasible_candidates,
@@ -42,7 +45,6 @@ from copilot.tools import (
     build_default_registry,
 )
 
-
 class AgentOrchestrator:
 
     def __init__(
@@ -65,9 +67,12 @@ class AgentOrchestrator:
         self.gemini_investigator = (
          gemini_investigator
         )
-        self.approval_controller = ApprovalController()
+        self.controller = ApprovalController()
         self.reassessor = CandidateReassessor(
             ranker=self.ranker,
+        )
+        self.decision_lifecycle = (
+            DecisionLifecycleController()
         )
 
         self.evidence = EvidenceStore()
