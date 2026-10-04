@@ -1,6 +1,6 @@
 from typing import Any
 
-from copilot.mock_engine import MockEngineClient
+from copilot.engine.client import EngineClient
 
 from .base import AerisTool, ToolResult
 
@@ -15,7 +15,7 @@ class SimulateNetworkImpactTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -92,7 +92,7 @@ class GetNetworkMetricsTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -131,10 +131,56 @@ class GetNetworkMetricsTool(AerisTool):
         )
 
 
+class ScoreCandidatesTool(AerisTool):
+    """Request the engine's authoritative candidate ranking."""
+
+    name = "score_candidates"
+    description = "Score evaluated candidates using the deterministic engine's configured scoring model."
+
+    def __init__(self, engine: EngineClient) -> None:
+        self.engine = engine
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "candidate_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "IDs of candidates to evaluate and rank.",
+                }
+            },
+            "required": ["candidate_ids"],
+        }
+
+    def execute(self, candidate_ids: list[str], **kwargs: Any) -> ToolResult:
+        if not candidate_ids:
+            return ToolResult.failure(
+                tool_name=self.name,
+                error_code="INVALID_ARGUMENTS",
+                error_message="candidate_ids must contain at least one candidate ID.",
+            )
+        candidates = self.engine.score_candidates(candidate_ids)
+        return ToolResult.success(
+            tool_name=self.name,
+            summary=f"The deterministic engine ranked {len(candidates)} candidate(s).",
+            data={"candidates": candidates},
+            evidence=[
+                {
+                    "kind": "ENGINE_SCORE",
+                    "title": "Candidate ranking",
+                    "summary": "Candidate ranking was calculated by the deterministic engine.",
+                }
+            ],
+        )
+
+
 def build_simulation_tools(
-    engine: MockEngineClient,
+    engine: EngineClient,
 ) -> list[AerisTool]:
     return [
         SimulateNetworkImpactTool(engine),
         GetNetworkMetricsTool(engine),
+        ScoreCandidatesTool(engine),
     ]

@@ -1,6 +1,6 @@
 from typing import Any
 
-from copilot.mock_engine import MockEngineClient
+from copilot.engine.client import EngineClient
 
 from .base import AerisTool, ToolResult
 
@@ -16,7 +16,7 @@ class GetAirspaceStateTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -34,7 +34,7 @@ class GetAirspaceStateTool(AerisTool):
         self,
         **kwargs: Any,
     ) -> ToolResult:
-        state = self.engine.get_state()
+        state = self.engine.get_airspace_state()
 
         return ToolResult.success(
             tool_name=self.name,
@@ -65,7 +65,7 @@ class GetDisruptionsTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -117,7 +117,7 @@ class GetTargetFlightTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -193,7 +193,7 @@ class GetSectorStateTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -251,7 +251,7 @@ class GetSectorStateTool(AerisTool):
                     "title": f"{sector_id} capacity",
                     "summary": (
                         f"Projected utilization for {sector_id}: "
-                        f"{sector.get('projected_utilization', 'N/A')}."
+                        f"{sector.get('projected_utilization', sector.get('utilization_pct', 'N/A'))}."
                     ),
                 }
             ],
@@ -268,7 +268,7 @@ class GetAirportStateTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -343,7 +343,7 @@ class GetWeatherStateTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -397,7 +397,7 @@ class GetRestrictionsTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -442,7 +442,7 @@ class GetRestrictionsTool(AerisTool):
 
 
 def build_airspace_tools(
-    engine: MockEngineClient,
+    engine: EngineClient,
 ) -> list[AerisTool]:
     return [
         GetAirspaceStateTool(engine),

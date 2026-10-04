@@ -1,6 +1,6 @@
 from typing import Any
 
-from copilot.mock_engine import MockEngineClient
+from copilot.engine.client import EngineClient
 
 from .base import AerisTool, ToolResult
 
@@ -15,7 +15,7 @@ class GenerateAlternativesTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -39,11 +39,15 @@ class GenerateAlternativesTool(AerisTool):
         flight_id: str,
         **kwargs: Any,
     ) -> ToolResult:
-        candidates = (
-            self.engine.get_alternatives(
-                flight_id
+        try:
+            candidates = self.engine.get_alternatives(flight_id)
+        except ValueError as exc:
+            return ToolResult.failure(
+                tool_name=self.name,
+                error_code="FLIGHT_NOT_FOUND",
+                error_message=str(exc),
+                summary="Candidate generation could not resolve the requested flight.",
             )
-        )
 
         if not candidates:
             return ToolResult.failure(
@@ -91,7 +95,7 @@ class ValidateCandidateTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -191,7 +195,7 @@ class ValidateCandidateTool(AerisTool):
 
 
 def build_route_tools(
-    engine: MockEngineClient,
+    engine: EngineClient,
 ) -> list[AerisTool]:
     return [
         GenerateAlternativesTool(engine),

@@ -1,14 +1,25 @@
 from types import SimpleNamespace
 
+import pytest
+
 from copilot.agent.gemini_runner import (
     GeminiInvestigator,
 )
 from copilot.llm import (
     GeminiClient,
 )
+from copilot.mock_engine import MockEngineClient
 from copilot.tools import (
-    build_default_registry,
+    build_default_registry as _build_default_registry,
 )
+
+
+def build_default_registry():
+    return _build_default_registry(MockEngineClient())
+
+
+def _require_genai_sdk():
+    pytest.importorskip("google.genai", reason="Gemini tool-loop tests require google-genai")
 
 
 class FakeModels:
@@ -178,6 +189,7 @@ def _build_fake_client(
 
 
 def test_gemini_client_executes_allowed_tool():
+    _require_genai_sdk()
     fake_models = FakeModels()
 
     fake_client = _build_fake_client(
@@ -228,7 +240,10 @@ def test_gemini_client_executes_allowed_tool():
 
 
 def test_investigator_exposes_only_policy_allowed_tools():
-    investigator = GeminiInvestigator()
+    investigator = GeminiInvestigator(
+        registry=build_default_registry(),
+        gemini_client=GeminiClient(client=SimpleNamespace(models=object()), model="test-model"),
+    )
 
     names = {
         item["name"]
@@ -249,7 +264,10 @@ def test_investigator_exposes_only_policy_allowed_tools():
 
 
 def test_investigator_policy_snapshot_is_explicit():
-    investigator = GeminiInvestigator()
+    investigator = GeminiInvestigator(
+        registry=build_default_registry(),
+        gemini_client=GeminiClient(client=SimpleNamespace(models=object()), model="test-model"),
+    )
 
     snapshot = (
         investigator.policy_snapshot()
@@ -274,6 +292,7 @@ def test_investigator_policy_snapshot_is_explicit():
 
 
 def test_blocked_tool_call_is_returned_as_structured_failure():
+    _require_genai_sdk()
     fake_models = (
         FakeModelsWithBlockedTool()
     )
@@ -326,6 +345,7 @@ def test_blocked_tool_call_is_returned_as_structured_failure():
 
 
 def test_investigation_quality_detects_missing_evidence():
+    _require_genai_sdk()
     fake_models = FakeModels()
 
     fake_client = _build_fake_client(

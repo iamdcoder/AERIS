@@ -1,5 +1,6 @@
 import pytest
 
+from copilot.mock_engine import MockEngineClient
 from copilot.agent.planner import (
     NoFeasibleCandidateError,
     select_initial_leader,
@@ -9,8 +10,12 @@ from copilot.llm import (
 )
 from copilot.tools import (
     ToolRegistry,
-    build_default_registry,
+    build_default_registry as _build_default_registry,
 )
+
+
+def build_default_registry():
+    return _build_default_registry(MockEngineClient())
 
 
 def test_no_feasible_candidates_fails_honestly():

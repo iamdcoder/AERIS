@@ -2,9 +2,14 @@ from copilot.agent.guardrails import (
     GuardedToolRegistry,
     ToolPolicy,
 )
+from copilot.mock_engine import MockEngineClient
 from copilot.tools import (
-    build_default_registry,
+    build_default_registry as _build_default_registry,
 )
+
+
+def build_default_registry():
+    return _build_default_registry(MockEngineClient())
 
 
 def test_investigation_policy_exposes_only_read_tools():

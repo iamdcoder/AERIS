@@ -1,4 +1,4 @@
-from copilot.mock_engine import MockEngineClient
+from copilot.engine.client import EngineClient, RealEngineClient
 
 from .airspace_tools import build_airspace_tools
 from .base import AerisTool, ToolResult
@@ -12,12 +12,10 @@ from .simulation_tools import build_simulation_tools
 
 
 def build_default_registry(
-    engine: MockEngineClient | None = None,
+    engine: EngineClient | None = None,
 ) -> ToolRegistry:
-    engine = (
-        engine
-        or MockEngineClient()
-    )
+    if engine is None:
+        engine = RealEngineClient()
 
     registry = ToolRegistry()
 
@@ -40,5 +38,7 @@ __all__ = [
     "ToolResult",
     "ToolRegistry",
     "ToolNotFoundError",
+    "EngineClient",
+    "RealEngineClient",
     "build_default_registry",
 ]

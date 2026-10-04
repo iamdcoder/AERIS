@@ -33,9 +33,7 @@ from .state import (
 from .synthesizer import (
     build_recommendation,
 )
-from copilot.mock_engine import (
-    MockEngineClient,
-)
+from copilot.engine.client import EngineClient, RealEngineClient
 from copilot.tools import (
     ToolRegistry,
     build_default_registry,
@@ -65,12 +63,14 @@ class AgentOrchestrator:
         self,
         *,
         registry: ToolRegistry | None = None,
+        engine: EngineClient | None = None,
         gemini_investigator: GeminiInvestigator | None = None,
     ) -> None:
+        self.engine = engine or RealEngineClient()
         self.registry = (
             registry
             or build_default_registry(
-                MockEngineClient()
+                self.engine
             )
         )
 
@@ -877,10 +877,12 @@ class AgentOrchestrator:
                 )
                 is True
             ):
+                candidate.update(result.data)
                 feasible.append(
                     candidate
                 )
             else:
+                candidate.update(result.data)
                 state.events.append(
                     self._event(
                         state,
@@ -1019,6 +1021,37 @@ class AgentOrchestrator:
         state.stress_test_results = (
             stress_results
         )
+
+        ranked, ranking_evidence_ids = self._invoke_tool(
+            state,
+            "score_candidates",
+            {"candidate_ids": candidate_ids},
+        )
+        scored_candidates = ranked.data.get("candidates", [])
+        if scored_candidates:
+            scored_by_id = {
+                candidate["candidate_id"]: candidate
+                for candidate in scored_candidates
+            }
+            state.candidates = [
+                {**candidate, **scored_by_id.get(candidate.get("candidate_id"), {})}
+                for candidate in state.candidates
+            ]
+            state.feasible_candidates = sorted(
+                [candidate for candidate in state.candidates if candidate.get("feasible") is True],
+                key=lambda candidate: candidate.get("decision_score", 0.0),
+                reverse=True,
+            )
+            if state.feasible_candidates:
+                state.events.append(
+                    self._event(
+                        state,
+                        "ENGINE_RANKING_READY",
+                        f"The deterministic engine ranked {len(state.feasible_candidates)} feasible candidate(s).",
+                        candidate_id=state.feasible_candidates[0]["candidate_id"],
+                        evidence_ids=ranking_evidence_ids,
+                    )
+                )
 
         state.events.append(
             self._event(

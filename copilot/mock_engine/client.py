@@ -6,11 +6,9 @@ from .loader import load_fixture
 
 class MockEngineClient:
     """
-    Deterministic engine adapter used while Person 1's
-    real airspace engine is being built.
+    Fixture-backed engine adapter for unit tests and offline demos.
 
-    This class imitates the public capability surface that
-    the future real engine will expose.
+    Production Copilot defaults use RealEngineClient instead.
     """
 
     def __init__(self) -> None:
@@ -36,6 +34,9 @@ class MockEngineClient:
         return deepcopy(
             self._state
         )
+
+    def get_airspace_state(self) -> dict[str, Any]:
+        return self.get_state()
 
     def get_disruptions(
         self,
@@ -100,6 +101,12 @@ class MockEngineClient:
                 )
 
         return None
+
+    def get_weather_state(self) -> list[dict[str, Any]]:
+        return deepcopy(self._state.get("weather_cells", []))
+
+    def get_restrictions(self) -> list[dict[str, Any]]:
+        return deepcopy(self._state.get("restrictions", []))
 
     def get_network_metrics(
         self,
@@ -263,6 +270,26 @@ class MockEngineClient:
                 )
 
         return None
+
+    def get_stress_test_result(
+        self,
+        candidate_id: str,
+    ) -> dict[str, Any] | None:
+        return self.get_stress_result(candidate_id)
+
+    def score_candidates(self, candidate_ids: list[str]) -> list[dict[str, Any]]:
+        allowed = set(candidate_ids)
+        return deepcopy(
+            sorted(
+                [
+                    candidate
+                    for candidate in self._alternatives.get("alternatives", [])
+                    if candidate.get("candidate_id") in allowed
+                ],
+                key=lambda candidate: candidate.get("decision_score", 0.0),
+                reverse=True,
+            )
+        )
 
     def healthcheck(
         self,

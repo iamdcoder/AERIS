@@ -32,11 +32,11 @@ def criticise_candidate(
         stress_result.get("total", 0)
     )
 
-    survival = (
-        passed / total
-        if total
-        else 0.0
-    )
+    if stress_result.get("survival_pct") is not None:
+        survival = float(stress_result["survival_pct"]) / 100.0
+    else:
+        # Legacy mock fixtures expose only passed/total.
+        survival = passed / total if total else 0.0
 
     critical_failure = stress_result.get(
         "critical_failure"

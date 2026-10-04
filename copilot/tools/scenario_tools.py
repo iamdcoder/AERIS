@@ -1,6 +1,6 @@
 from typing import Any
 
-from copilot.mock_engine import MockEngineClient
+from copilot.engine.client import EngineClient
 
 from .base import AerisTool, ToolResult
 
@@ -15,7 +15,7 @@ class StressTestCandidateTool(AerisTool):
 
     def __init__(
         self,
-        engine: MockEngineClient,
+        engine: EngineClient,
     ) -> None:
         self.engine = engine
 
@@ -42,7 +42,7 @@ class StressTestCandidateTool(AerisTool):
         **kwargs: Any,
     ) -> ToolResult:
         result = (
-            self.engine.get_stress_result(
+            self.engine.get_stress_test_result(
                 candidate_id
             )
         )
@@ -74,11 +74,11 @@ class StressTestCandidateTool(AerisTool):
             )
         )
 
-        survival = (
-            passed / total
-            if total > 0
-            else 0.0
-        )
+        if result.get("survival_pct") is not None:
+            survival = float(result["survival_pct"]) / 100.0
+        else:
+            # Backward compatibility with the test-only legacy fixture shape.
+            survival = passed / total if total > 0 else 0.0
 
         warnings = []
 
@@ -125,7 +125,7 @@ class StressTestCandidateTool(AerisTool):
 
 
 def build_scenario_tools(
-    engine: MockEngineClient,
+    engine: EngineClient,
 ) -> list[AerisTool]:
     return [
         StressTestCandidateTool(engine),

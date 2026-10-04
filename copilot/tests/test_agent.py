@@ -1,6 +1,8 @@
 from copilot.agent.orchestrator import (
     AgentOrchestrator,
 )
+from copilot.engine.client import RealEngineClient
+from copilot.mock_engine import MockEngineClient
 from copilot.agent.state import (
     AgentStage,
     RunStatus,
@@ -49,7 +51,7 @@ def test_invalid_state_transition_is_rejected():
 
 def test_mock_preview_stops_for_human_approval():
     state = (
-        AgentOrchestrator()
+        AgentOrchestrator(engine=MockEngineClient())
         .run_mock_preview()
     )
 
@@ -96,7 +98,7 @@ def test_mock_preview_stops_for_human_approval():
 
 def test_agent_creates_investigation_plan():
     state = (
-        AgentOrchestrator()
+        AgentOrchestrator(engine=MockEngineClient())
         .run_mock_preview()
     )
 
@@ -142,7 +144,7 @@ def test_agent_creates_investigation_plan():
 
 def test_investigation_is_complete():
     state = (
-        AgentOrchestrator()
+        AgentOrchestrator(engine=MockEngineClient())
         .run_mock_preview()
     )
 
@@ -168,7 +170,7 @@ def test_investigation_is_complete():
 
 def test_diagnosis_contains_causal_graph():
     state = (
-        AgentOrchestrator()
+        AgentOrchestrator(engine=MockEngineClient())
         .run_mock_preview()
     )
 
@@ -205,7 +207,7 @@ def test_diagnosis_contains_causal_graph():
 
 def test_orchestrator_uses_registered_tools():
     state = (
-        AgentOrchestrator()
+        AgentOrchestrator(engine=MockEngineClient())
         .run_mock_preview()
     )
 
@@ -239,20 +241,22 @@ def test_orchestrator_uses_registered_tools():
     )
 
 
-def test_agent_does_not_need_direct_engine_reference():
+def test_orchestrator_uses_injected_engine_interface():
     orchestrator = (
-        AgentOrchestrator()
+        AgentOrchestrator(engine=MockEngineClient())
     )
 
-    assert not hasattr(
-        orchestrator,
-        "engine",
-    )
+    assert isinstance(orchestrator.engine, MockEngineClient)
+
+
+def test_default_orchestrator_uses_real_engine_client():
+    orchestrator = AgentOrchestrator()
+    assert isinstance(orchestrator.engine, RealEngineClient)
 
 
 def test_tool_calls_are_visible_as_events():
     state = (
-        AgentOrchestrator()
+        AgentOrchestrator(engine=MockEngineClient())
         .run_mock_preview()
     )
 

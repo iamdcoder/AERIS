@@ -4,8 +4,12 @@ from copilot.mock_engine import (
 
 from copilot.tools import (
     ToolRegistry,
-    build_default_registry,
+    build_default_registry as _build_default_registry,
 )
+
+
+def build_default_registry():
+    return _build_default_registry(MockEngineClient())
 
 
 def test_mock_engine_loads_deterministic_state():
@@ -150,6 +154,7 @@ def test_default_registry_contains_expected_tools():
         "simulate_network_impact",
         "get_network_metrics",
         "stress_test_candidate",
+        "score_candidates",
     }
 
 
@@ -162,7 +167,7 @@ def test_tool_definitions_are_structured():
         registry.definitions()
     )
 
-    assert len(definitions) == 12
+    assert len(definitions) == 13
 
     for definition in definitions:
         assert "name" in definition
@@ -196,7 +201,7 @@ def test_function_declarations_are_provider_neutral():
         registry.function_declarations()
     )
 
-    assert len(declarations) == 12
+    assert len(declarations) == 13
 
     for declaration in declarations:
         assert set(

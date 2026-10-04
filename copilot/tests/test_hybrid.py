@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from copilot.agent import (
     AgentOrchestrator,
 )
@@ -10,9 +12,18 @@ from copilot.agent.state import (
 from copilot.llm import (
     GeminiClient,
 )
+from copilot.mock_engine import MockEngineClient
 from copilot.tools import (
-    build_default_registry,
+    build_default_registry as _build_default_registry,
 )
+
+
+def build_default_registry():
+    return _build_default_registry(MockEngineClient())
+
+
+def _require_genai_sdk():
+    pytest.importorskip("google.genai", reason="Gemini tool-loop tests require google-genai")
 
 
 class FakeGeminiModels:
@@ -147,6 +158,7 @@ def test_hybrid_preview_can_finish_with_gemini_investigation():
 
 
 def test_hybrid_investigation_writes_memory():
+    _require_genai_sdk()
     investigator = (
         build_fake_investigator()
     )
@@ -177,6 +189,7 @@ def test_hybrid_investigation_writes_memory():
 
 
 def test_hybrid_investigation_returns_structured_results():
+    _require_genai_sdk()
     investigator = (
         build_fake_investigator()
     )
