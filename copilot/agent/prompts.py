@@ -54,26 +54,26 @@ Ask yourself after each result:
 "What important uncertainty remains?"
 "What tool could reduce that uncertainty?"
 
-When comparing interventions:
+When comparing operational possibilities:
 - distinguish immediate target-flight benefit from network impact;
-- pay attention to surrounding traffic;
+- consider surrounding traffic;
 - consider future deterioration;
 - distinguish hard constraints from soft preferences;
 - never hide rejection reasons.
 
 When stress-test evidence is available:
-- identify candidates that are fragile;
+- identify fragile candidates;
 - identify plausible failure conditions;
-- treat a critical failure as a reason to challenge the candidate.
+- treat critical failures as reasons to challenge a candidate.
 
 When uncertain:
 - lower confidence;
-- identify the missing evidence;
+- identify missing evidence;
 - do not create false precision.
 
-OBSERVABLE REASONING
+OBSERVABLE BEHAVIOR
 
-Your externally visible behavior should be represented by:
+The externally visible investigation should be represented by:
 - tool calls;
 - tool results;
 - concise evidence summaries;
@@ -82,21 +82,20 @@ Your externally visible behavior should be represented by:
 - challenges;
 - recommendation.
 
-Do not reveal hidden chain-of-thought.
-Do not produce a private internal reasoning transcript.
+Do not expose hidden chain-of-thought.
+Do not produce a private reasoning transcript.
 
-FINAL RESPONSE
+FINAL INVESTIGATION RESPONSE
 
-When you have enough evidence, provide a concise operational
-investigation summary containing:
+When enough evidence is available, provide a concise summary
+containing:
 
 1. Situation
 2. Main cause
 3. Important affected resources
 4. Evidence gathered
-5. Important candidate implications
-6. Remaining uncertainty
-7. Recommended next investigation or decision step
+5. Important uncertainty
+6. Recommended next investigation or decision step
 
 Do not claim final execution.
 Human approval remains mandatory.
@@ -107,29 +106,65 @@ def build_investigation_prompt(
     *,
     target_flight_id: str,
     scenario_id: str,
+    initial_state: dict | None = None,
 ) -> str:
+    state = initial_state or {}
+
+    target = state.get(
+        "target",
+        {},
+    )
+
+    disruptions = state.get(
+        "disruptions",
+        {},
+    )
+
+    network = state.get(
+        "network_summary",
+        {},
+    )
+
+    alerts = disruptions.get(
+        "disruptions",
+        []
+    )
+
     return f"""
-Investigate the current simulated airspace situation for:
+Investigate the current simulated airspace situation.
 
-Target flight: {target_flight_id}
-Scenario: {scenario_id}
+Target flight:
+{target_flight_id}
 
-Begin by inspecting the current state and determining what
-operational evidence is necessary.
+Scenario:
+{scenario_id}
 
-You are expected to decide which available tools are useful.
+The application has already loaded an initial snapshot.
 
-Do not generate an invented route or safety calculation.
+Target state:
+{target}
 
-Do not approve or execute anything.
+Active disruption signals:
+{alerts}
 
-The goal of this investigation is to determine:
+Network summary:
+{network}
 
+Your objective is to determine:
 - what is degrading;
 - why it is degrading;
 - which resources are affected;
-- what evidence should influence intervention planning;
-- what uncertainties remain.
+- what evidence is still required;
+- what uncertainty remains.
 
 Use tools when evidence is needed.
+
+Do not invent aviation calculations.
+
+Do not generate a made-up route.
+
+Do not approve or execute anything.
+
+The initial snapshot is context, not permission to assume
+that every relevant condition is fully understood.
 """

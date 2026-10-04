@@ -1,29 +1,41 @@
 from typing import Any
 
 from .critic import criticise_candidate
-from .diagnostics import build_causal_diagnosis
+from .diagnostics import (
+    build_causal_diagnosis,
+)
 from .evidence import EvidenceStore
-from .investigation import (
-    build_investigation_plan,
-    update_plan_completeness,
+from .gemini_runner import (
+    GeminiInvestigator,
+)
+from .investigation_quality import (
+    InvestigationQuality,
 )
 from .planner import (
     NoFeasibleCandidateError,
     feasible_candidates,
     select_initial_leader,
 )
+from .prompts import (
+    AERIS_AGENT_SYSTEM_PROMPT,
+)
 from .state import (
     AgentEvent,
     AgentStage,
     AgentState,
+    Diagnosis,
     InvestigationStatus,
     RunStatus,
     can_transition,
     new_agent_state,
     transition,
 )
-from .synthesizer import build_recommendation
-from copilot.mock_engine import MockEngineClient
+from .synthesizer import (
+    build_recommendation,
+)
+from copilot.mock_engine import (
+    MockEngineClient,
+)
 from copilot.tools import (
     ToolRegistry,
     build_default_registry,
@@ -32,28 +44,39 @@ from copilot.tools import (
 
 class AgentOrchestrator:
     """
-    AERIS Person-2 orchestration layer.
+    Main AERIS agent runtime.
 
-    The orchestrator talks to capabilities through the
-    ToolRegistry rather than directly accessing engine internals.
+    Two investigation modes exist:
 
-    The current registry uses deterministic mock tools.
-    Future phases can replace those adapters with the real
-    Person-1 engine and add Gemini tool selection on top.
+    1. Deterministic investigation
+       - fully reproducible
+       - used as fallback
+       - useful for tests and offline operation
+
+    2. Gemini investigation
+       - model selects investigation tools
+       - deterministic tools remain authoritative
+       - evidence is imported into AgentState
+
+    Both paths converge into the same state-machine pipeline.
     """
 
     def __init__(
         self,
+        *,
         registry: ToolRegistry | None = None,
+        gemini_investigator: GeminiInvestigator | None = None,
     ) -> None:
-        if registry is not None:
-            self.registry = registry
-        else:
-            self.registry = (
-                build_default_registry(
-                    MockEngineClient()
-                )
+        self.registry = (
+            registry
+            or build_default_registry(
+                MockEngineClient()
             )
+        )
+
+        self.gemini_investigator = (
+            gemini_investigator
+        )
 
         self.evidence = EvidenceStore()
 
@@ -61,9 +84,13 @@ class AgentOrchestrator:
         self,
         *,
         run_id: str = "RUN-001",
-        scenario_id: str = "mumbai_weather_crisis",
+        scenario_id: str = (
+            "mumbai_weather_crisis"
+        ),
         target_flight_id: str = "F102",
     ) -> AgentState:
+        self.evidence.reset()
+
         state = new_agent_state(
             run_id=run_id,
             scenario_id=scenario_id,
@@ -80,7 +107,7 @@ class AgentOrchestrator:
                 AgentStage.DIAGNOSE,
                 (
                     "Observation complete; "
-                    "begin intelligent investigation."
+                    "begin deterministic diagnosis."
                 ),
             )
 
@@ -88,142 +115,230 @@ class AgentOrchestrator:
                 state
             )
 
-            transition(
-                state,
-                AgentStage.PLAN,
-                (
-                    "Causal diagnosis complete; "
-                    "request intervention candidates."
-                ),
-            )
-
-            self._plan(
-                state
-            )
-
-            transition(
-                state,
-                AgentStage.EVALUATE,
-                (
-                    "Candidate set loaded; "
-                    "evaluate hard feasibility."
-                ),
-            )
-
-            self._evaluate(
-                state
-            )
-
-            transition(
-                state,
-                AgentStage.STRESS_TEST,
-                (
-                    "Feasible candidates isolated; "
-                    "collect network and future-state evidence."
-                ),
-            )
-
-            self._stress_test(
-                state
-            )
-
-            transition(
-                state,
-                AgentStage.CRITIC,
-                (
-                    "Evidence collected; "
-                    "challenge preliminary leader."
-                ),
-            )
-
-            self._critic(
-                state
-            )
-
-            transition(
-                state,
-                AgentStage.RECOMMEND,
-                (
-                    "Critic stage complete; "
-                    "synthesize recommendation."
-                ),
-            )
-
-            self._recommend(
-                state
-            )
-
-            transition(
-                state,
-                AgentStage.HUMAN_APPROVAL,
-                (
-                    "Recommendation prepared; "
-                    "waiting for human approval."
-                ),
-            )
-
-            state.status = (
-                RunStatus.WAITING_HUMAN
-            )
-
-            self._sync_evidence(
-                state
-            )
-
-            return state
-
-        except NoFeasibleCandidateError as exc:
-            state.errors.append(
-                str(exc)
-            )
-
-            state.status = (
-                RunStatus.DEGRADED
-            )
-
-            if can_transition(
-                state.stage,
-                AgentStage.DEGRADED,
-            ):
-                transition(
-                    state,
-                    AgentStage.DEGRADED,
-                    str(exc),
-                )
-
-            self._sync_evidence(
+            self._continue_after_diagnosis(
                 state
             )
 
             return state
 
         except Exception as exc:
-            state.errors.append(
-                str(exc)
+            return self._fail_state(
+                state,
+                exc,
             )
 
-            state.status = (
-                RunStatus.FAILED
+    def run_hybrid_preview(
+        self,
+        *,
+        run_id: str = "RUN-HYBRID-001",
+        scenario_id: str = (
+            "mumbai_weather_crisis"
+        ),
+        target_flight_id: str = "F102",
+        gemini_investigator: GeminiInvestigator | None = None,
+    ) -> AgentState:
+        """
+        Attempt a Gemini-backed investigation.
+
+        If Gemini is unavailable or evidence is insufficient,
+        AERIS falls back to deterministic diagnosis rather
+        than fabricating a result.
+
+        After diagnosis, both paths use the same downstream
+        candidate/evaluation/stress-test/critic pipeline.
+        """
+
+        self.evidence.reset()
+
+        state = new_agent_state(
+            run_id=run_id,
+            scenario_id=scenario_id,
+            target_flight_id=target_flight_id,
+        )
+
+        try:
+            self._observe(
+                state
             )
 
-            if can_transition(
-                state.stage,
-                AgentStage.FAILED,
+            transition(
+                state,
+                AgentStage.DIAGNOSE,
+                (
+                    "Observation complete; "
+                    "attempt hybrid investigation."
+                ),
+            )
+
+            investigator = (
+                gemini_investigator
+                or self.gemini_investigator
+            )
+
+            if investigator is None:
+                try:
+                    investigator = (
+                        GeminiInvestigator(
+                            registry=self.registry
+                        )
+                    )
+                except Exception as exc:
+                    self._record_fallback(
+                        state,
+                        (
+                            "Gemini could not be initialized: "
+                            f"{exc}"
+                        ),
+                    )
+
+                    self._diagnose(
+                        state
+                    )
+
+                    self._continue_after_diagnosis(
+                        state
+                    )
+
+                    return state
+
+            result = (
+                investigator.investigate(
+                    target_flight_id=(
+                        target_flight_id
+                    ),
+                    scenario_id=scenario_id,
+                    initial_state=(
+                        state.world_state
+                    ),
+                )
+            )
+
+            self._record_gemini_result(
+                state,
+                result,
+            )
+
+            if (
+                result.status
+                == "COMPLETED"
             ):
-                transition(
+                self._apply_gemini_diagnosis(
                     state,
-                    AgentStage.FAILED,
+                    result,
+                )
+
+            else:
+                self._record_fallback(
+                    state,
                     (
-                        "Fatal orchestration error: "
-                        f"{exc}"
+                        "Gemini investigation did not "
+                        "produce sufficient evidence. "
+                        "Deterministic investigation is "
+                        "being used as fallback."
                     ),
                 )
 
-            self._sync_evidence(
+                self._diagnose(
+                    state
+                )
+
+            self._continue_after_diagnosis(
                 state
             )
 
             return state
+
+        except Exception as exc:
+            return self._fail_state(
+                state,
+                exc,
+            )
+
+    def _continue_after_diagnosis(
+        self,
+        state: AgentState,
+    ) -> None:
+        transition(
+            state,
+            AgentStage.PLAN,
+            (
+                "Diagnosis complete; "
+                "request intervention candidates."
+            ),
+        )
+
+        self._plan(
+            state
+        )
+
+        transition(
+            state,
+            AgentStage.EVALUATE,
+            (
+                "Candidate set loaded; "
+                "evaluate hard feasibility."
+            ),
+        )
+
+        self._evaluate(
+            state
+        )
+
+        transition(
+            state,
+            AgentStage.STRESS_TEST,
+            (
+                "Feasible candidates isolated; "
+                "collect network and future-state evidence."
+            ),
+        )
+
+        self._stress_test(
+            state
+        )
+
+        transition(
+            state,
+            AgentStage.CRITIC,
+            (
+                "Evidence collected; "
+                "challenge preliminary leader."
+            ),
+        )
+
+        self._critic(
+            state
+        )
+
+        transition(
+            state,
+            AgentStage.RECOMMEND,
+            (
+                "Critic complete; "
+                "synthesize recommendation."
+            ),
+        )
+
+        self._recommend(
+            state
+        )
+
+        transition(
+            state,
+            AgentStage.HUMAN_APPROVAL,
+            (
+                "Recommendation prepared; "
+                "waiting for human approval."
+            ),
+        )
+
+        state.status = (
+            RunStatus.WAITING_HUMAN
+        )
+
+        self._sync_evidence(
+            state
+        )
 
     def _invoke_tool(
         self,
@@ -231,10 +346,6 @@ class AgentOrchestrator:
         tool_name: str,
         arguments: dict[str, Any] | None = None,
     ):
-        evidence_count_before = len(
-            self.evidence.all()
-        )
-
         state.events.append(
             self._event(
                 state,
@@ -251,57 +362,7 @@ class AgentOrchestrator:
             arguments or {},
         )
 
-        new_evidence_ids: list[str] = []
-
-        if result.ok:
-            for item in result.evidence:
-                evidence = self.evidence.add(
-                    kind=str(
-                        item.get(
-                            "kind",
-                            "TOOL_RESULT",
-                        )
-                    ),
-                    title=str(
-                        item.get(
-                            "title",
-                            result.tool_name,
-                        )
-                    ),
-                    summary=str(
-                        item.get(
-                            "summary",
-                            result.summary,
-                        )
-                    ),
-                    source=result.tool_name,
-                    candidate_id=item.get(
-                        "candidate_id"
-                    ),
-                    severity=item.get(
-                        "severity"
-                    ),
-                    data=item,
-                )
-
-                new_evidence_ids.append(
-                    evidence.evidence_id
-                )
-
-            state.events.append(
-                self._event(
-                    state,
-                    "TOOL_RESULT",
-                    result.summary,
-                    tool_name=result.tool_name,
-                    evidence_ids=(
-                        new_evidence_ids
-                    ),
-                )
-
-            )
-
-        else:
+        if not result.ok:
             state.errors.append(
                 (
                     f"{result.tool_name}: "
@@ -314,7 +375,9 @@ class AgentOrchestrator:
                     state,
                     "TOOL_ERROR",
                     result.summary,
-                    tool_name=result.tool_name,
+                    tool_name=(
+                        result.tool_name
+                    ),
                 )
             )
 
@@ -325,15 +388,57 @@ class AgentOrchestrator:
                 )
             )
 
-        if (
-            len(self.evidence.all())
-            < evidence_count_before
+        evidence_ids = []
+
+        for item in (
+            result.evidence
         ):
-            raise RuntimeError(
-                "Evidence store integrity error."
+            evidence = self.evidence.add(
+                kind=str(
+                    item.get(
+                        "kind",
+                        "TOOL_RESULT",
+                    )
+                ),
+                title=str(
+                    item.get(
+                        "title",
+                        result.tool_name,
+                    )
+                ),
+                summary=str(
+                    item.get(
+                        "summary",
+                        result.summary,
+                    )
+                ),
+                source=result.tool_name,
+                candidate_id=item.get(
+                    "candidate_id"
+                ),
+                severity=item.get(
+                    "severity"
+                ),
+                data=item,
             )
 
-        return result, new_evidence_ids
+            evidence_ids.append(
+                evidence.evidence_id
+            )
+
+        state.events.append(
+            self._event(
+                state,
+                "TOOL_RESULT",
+                result.summary,
+                tool_name=(
+                    result.tool_name
+                ),
+                evidence_ids=evidence_ids,
+            )
+        )
+
+        return result, evidence_ids
 
     def _observe(
         self,
@@ -373,12 +478,23 @@ class AgentOrchestrator:
             "target": target.data,
         }
 
+        self._remember(
+            state,
+            "OBSERVATION",
+            (
+                "Initial airspace, disruption and "
+                "target-flight state loaded."
+            ),
+            "deterministic_observation",
+            "HIGH",
+        )
+
         state.events.append(
             self._event(
                 state,
                 "OBSERVATION_READY",
                 (
-                    "Airspace, disruptions and "
+                    "Airspace, disruption and "
                     "target-flight state assembled."
                 ),
             )
@@ -392,14 +508,15 @@ class AgentOrchestrator:
         self,
         state: AgentState,
     ) -> None:
-        """
-        Build an evidence-driven investigation plan,
-        execute the selected tool calls and construct
-        a causal diagnosis.
-        """
+        from .investigation import (
+            build_investigation_plan,
+            update_plan_completeness,
+        )
 
-        plan = build_investigation_plan(
-            state.world_state
+        plan = (
+            build_investigation_plan(
+                state.world_state
+            )
         )
 
         state.investigation_plan = (
@@ -411,103 +528,57 @@ class AgentOrchestrator:
                 state,
                 "INVESTIGATION_PLAN_CREATED",
                 (
-                    f"Investigation policy selected "
-                    f"{len(plan.questions)} evidence question(s)."
+                    f"Deterministic investigation "
+                    f"selected {len(plan.questions)} "
+                    "question(s)."
                 ),
             )
         )
 
-        for question in plan.questions:
-            try:
-                result, evidence_ids = (
-                    self._invoke_tool(
-                        state,
-                        question.tool_name,
-                        question.arguments,
-                    )
+        for question in (
+            plan.questions
+        ):
+            result, evidence_ids = (
+                self._invoke_tool(
+                    state,
+                    question.tool_name,
+                    question.arguments,
                 )
+            )
 
-                question.status = (
-                    InvestigationStatus.COMPLETED
-                )
+            question.status = (
+                InvestigationStatus.COMPLETED
+            )
 
-                question.evidence_ids = (
-                    evidence_ids
-                )
+            question.evidence_ids = (
+                evidence_ids
+            )
 
-                question.result_summary = (
-                    result.summary
-                )
+            question.result_summary = (
+                result.summary
+            )
 
-                state.investigation_results.append(
-                    {
-                        "question_id": (
-                            question.question_id
-                        ),
-                        "tool_name": (
-                            question.tool_name
-                        ),
-                        "arguments": (
-                            question.arguments
-                        ),
-                        "status": "COMPLETED",
-                        "summary": (
-                            result.summary
-                        ),
-                        "data": result.data,
-                        "evidence_ids": (
-                            evidence_ids
-                        ),
-                    }
-                )
-
-                state.events.append(
-                    self._event(
-                        state,
-                        "INVESTIGATION_FINDING",
-                        (
-                            f"{question.question_id}: "
-                            f"{result.summary}"
-                        ),
-                        tool_name=(
-                            question.tool_name
-                        ),
-                        evidence_ids=(
-                            evidence_ids
-                        ),
-                    )
-                )
-
-            except Exception as exc:
-                question.status = (
-                    InvestigationStatus.FAILED
-                )
-
-                question.result_summary = str(
-                    exc
-                )
-
-                state.investigation_results.append(
-                    {
-                        "question_id": (
-                            question.question_id
-                        ),
-                        "tool_name": (
-                            question.tool_name
-                        ),
-                        "arguments": (
-                            question.arguments
-                        ),
-                        "status": "FAILED",
-                        "summary": str(
-                            exc
-                        ),
-                        "data": {},
-                        "evidence_ids": [],
-                    }
-                )
-
-                raise
+            state.investigation_results.append(
+                {
+                    "question_id": (
+                        question.question_id
+                    ),
+                    "tool_name": (
+                        question.tool_name
+                    ),
+                    "arguments": (
+                        question.arguments
+                    ),
+                    "status": "COMPLETED",
+                    "summary": (
+                        result.summary
+                    ),
+                    "data": result.data,
+                    "evidence_ids": (
+                        evidence_ids
+                    ),
+                }
+            )
 
         update_plan_completeness(
             plan
@@ -537,7 +608,17 @@ class AgentOrchestrator:
             )
         )
 
-        state.diagnosis = diagnosis
+        state.diagnosis = (
+            diagnosis
+        )
+
+        self._remember(
+            state,
+            "DIAGNOSIS",
+            diagnosis.summary,
+            "deterministic_diagnosis",
+            "HIGH",
+        )
 
         state.events.append(
             self._event(
@@ -547,39 +628,183 @@ class AgentOrchestrator:
                 evidence_ids=(
                     diagnosis.evidence_ids
                 ),
-                data={
-                    "primary_cause": (
-                        diagnosis.primary_cause
-                    ),
-                    "urgency": (
-                        diagnosis.urgency
-                    ),
-                    "evidence_completeness": (
-                        diagnosis.evidence_completeness
-                    ),
-                    "causal_chain": (
-                        diagnosis.causal_chain
-                    ),
-                    "causal_node_count": (
-                        len(
-                            diagnosis
-                            .causal_graph
-                            .nodes
-                        )
-                    ),
-                    "causal_edge_count": (
-                        len(
-                            diagnosis
-                            .causal_graph
-                            .edges
-                        )
-                    ),
-                },
             )
         )
 
         self._sync_evidence(
             state
+        )
+
+    def _record_gemini_result(
+        self,
+        state: AgentState,
+        result: Any,
+    ) -> None:
+        for call in (
+            result.tool_calls
+        ):
+            state.events.append(
+                self._event(
+                    state,
+                    (
+                        "GEMINI_TOOL_RESULT"
+                        if call.ok
+                        else "GEMINI_TOOL_ERROR"
+                    ),
+                    (
+                        call.result_summary
+                        or (
+                            f"Gemini requested "
+                            f"{call.name}"
+                        )
+                    ),
+                    tool_name=call.name,
+                    data={
+                        "arguments": (
+                            call.arguments
+                        ),
+                        "ok": call.ok,
+                        "error_code": (
+                            call.error_code
+                        ),
+                    },
+                )
+            )
+
+        for memory in (
+            result.working_memory
+        ):
+            self._add_memory_record(
+                state,
+                memory,
+            )
+
+        for evidence in (
+            result.evidence
+        ):
+            evidence_id = (
+                self._copy_gemini_evidence(
+                    evidence
+                )
+            )
+
+            if evidence_id:
+                state.events.append(
+                    self._event(
+                        state,
+                        "EVIDENCE_ADDED",
+                        evidence[
+                            "summary"
+                        ],
+                        evidence_ids=[
+                            evidence_id
+                        ],
+                    )
+                )
+
+        state.investigation_results.extend(
+            result.investigation_results
+        )
+
+        if (
+            result.investigation_plan
+            is not None
+        ):
+            state.investigation_plan = (
+                result.investigation_plan
+            )
+
+    def _apply_gemini_diagnosis(
+        self,
+        state: AgentState,
+        result: Any,
+    ) -> None:
+        world_state = (
+            result.world_state
+            or state.world_state
+        )
+
+        state.world_state = (
+            world_state
+        )
+
+        investigation_results = (
+            result.investigation_results
+        )
+
+        diagnosis = (
+            build_causal_diagnosis(
+                world_state=(
+                    world_state
+                ),
+                investigation_results=(
+                    investigation_results
+                ),
+                target_flight_id=(
+                    state.target_flight_id
+                ),
+                evidence_ids=(
+                    self.evidence.ids()
+                ),
+                evidence_completeness=(
+                    result.quality.score
+                ),
+            )
+        )
+
+        state.diagnosis = (
+            diagnosis
+        )
+
+        self._remember(
+            state,
+            "GEMINI_DIAGNOSIS",
+            diagnosis.summary,
+            "gemini_hybrid_investigation",
+            "HIGH",
+        )
+
+        state.events.append(
+            self._event(
+                state,
+                "GEMINI_INVESTIGATION_COMPLETE",
+                (
+                    "Gemini investigation produced "
+                    "sufficient evidence for diagnosis."
+                ),
+                data={
+                    "quality_score": (
+                        result.quality.score
+                    ),
+                    "tool_calls": len(
+                        result.tool_calls
+                    ),
+                    "evidence_count": len(
+                        result.evidence
+                    ),
+                },
+            )
+        )
+
+    def _record_fallback(
+        self,
+        state: AgentState,
+        message: str,
+    ) -> None:
+        state.events.append(
+            self._event(
+                state,
+                "AGENT_FALLBACK",
+                message,
+            )
+        )
+
+        self._remember(
+            state,
+            "FALLBACK",
+            message,
+            "aeris_runtime",
+            "HIGH",
         )
 
     def _plan(
@@ -603,7 +828,9 @@ class AgentOrchestrator:
             [],
         )
 
-        state.candidates = candidates
+        state.candidates = (
+            candidates
+        )
 
         state.events.append(
             self._event(
@@ -623,9 +850,9 @@ class AgentOrchestrator:
     ) -> None:
         feasible = []
 
-        rejected = []
-
-        for candidate in state.candidates:
+        for candidate in (
+            state.candidates
+        ):
             candidate_id = str(
                 candidate.get(
                     "candidate_id"
@@ -644,26 +871,23 @@ class AgentOrchestrator:
                 )
             )
 
-            validation = result.data
-
-            if validation.get(
-                "feasible"
-            ) is True:
+            if (
+                result.data.get(
+                    "feasible"
+                )
+                is True
+            ):
                 feasible.append(
                     candidate
                 )
             else:
-                rejected.append(
-                    candidate
-                )
-
                 state.events.append(
                     self._event(
                         state,
                         "CANDIDATE_REJECTED",
                         (
-                            f"{candidate_id} rejected by "
-                            "hard-constraint evidence."
+                            f"{candidate_id} rejected "
+                            "by deterministic hard constraints."
                         ),
                         candidate_id=(
                             candidate_id
@@ -688,19 +912,24 @@ class AgentOrchestrator:
             state.candidates
         )
 
-        state.leading_candidate_id = str(
-            leader[
-                "candidate_id"
-            ]
+        state.leading_candidate_id = (
+            str(
+                leader[
+                    "candidate_id"
+                ]
+            )
         )
 
         evidence = self.evidence.add(
-            kind="PRELIMINARY_SELECTION",
-            title="Preliminary leader selected",
+            kind=(
+                "PRELIMINARY_SELECTION"
+            ),
+            title=(
+                "Preliminary leader selected"
+            ),
             summary=(
-                f"{state.leading_candidate_id} leads "
-                "on immediate/local criteria before "
-                "the resilience challenge."
+                f"{state.leading_candidate_id} "
+                "leads on immediate/local criteria."
             ),
             source="deterministic planner",
             candidate_id=(
@@ -748,7 +977,9 @@ class AgentOrchestrator:
 
         stress_results = []
 
-        for candidate_id in candidate_ids:
+        for candidate_id in (
+            candidate_ids
+        ):
             simulation, _ = (
                 self._invoke_tool(
                     state,
@@ -794,9 +1025,9 @@ class AgentOrchestrator:
                 state,
                 "EVALUATION_COMPLETE",
                 (
-                    f"Network simulation and stress testing "
-                    f"completed for {len(candidate_ids)} "
-                    "feasible candidate(s)."
+                    f"Network simulation and stress "
+                    f"testing completed for "
+                    f"{len(candidate_ids)} candidate(s)."
                 ),
             )
         )
@@ -808,7 +1039,8 @@ class AgentOrchestrator:
         candidate = next(
             (
                 item
-                for item in state.candidates
+                for item
+                in state.candidates
                 if item.get(
                     "candidate_id"
                 )
@@ -820,9 +1052,8 @@ class AgentOrchestrator:
         stress_result = next(
             (
                 item
-                for item in (
-                    state.stress_test_results
-                )
+                for item
+                in state.stress_test_results
                 if item.get(
                     "candidate_id"
                 )
@@ -840,9 +1071,11 @@ class AgentOrchestrator:
                 )
             )
 
-        result = criticise_candidate(
-            candidate,
-            stress_result,
+        result = (
+            criticise_candidate(
+                candidate,
+                stress_result,
+            )
         )
 
         evidence = self.evidence.add(
@@ -916,9 +1149,7 @@ class AgentOrchestrator:
             summary=(
                 recommendation.summary
             ),
-            source=(
-                "deterministic synthesizer"
-            ),
+            source="deterministic synthesizer",
             candidate_id=(
                 recommendation.candidate_id
             ),
@@ -927,8 +1158,7 @@ class AgentOrchestrator:
                     recommendation.confidence
                 ),
                 "why_selected": (
-                    recommendation
-                    .why_selected
+                    recommendation.why_selected
                 ),
             },
         )
@@ -959,6 +1189,84 @@ class AgentOrchestrator:
             )
         )
 
+    def _remember(
+        self,
+        state: AgentState,
+        category: str,
+        content: str,
+        source: str,
+        importance: str = "MEDIUM",
+    ) -> None:
+        self._add_memory_record(
+            state,
+            {
+                "memory_id": (
+                    f"M{len(state.working_memory) + 1:03d}"
+                ),
+                "category": category,
+                "content": content,
+                "source": source,
+                "importance": importance,
+                "data": {},
+            },
+        )
+
+    @staticmethod
+    def _add_memory_record(
+        state: AgentState,
+        memory: dict[str, Any],
+    ) -> None:
+        state.working_memory.append(
+            memory
+        )
+
+    def _copy_gemini_evidence(
+        self,
+        evidence: dict[str, Any],
+    ) -> str | None:
+        summary = evidence.get(
+            "summary"
+        )
+
+        if not summary:
+            return None
+
+        item = self.evidence.add(
+            kind=str(
+                evidence.get(
+                    "kind",
+                    "GEMINI_EVIDENCE",
+                )
+            ),
+            title=str(
+                evidence.get(
+                    "title",
+                    "Gemini tool evidence",
+                )
+            ),
+            summary=str(
+                summary
+            ),
+            source=str(
+                evidence.get(
+                    "source",
+                    "gemini",
+                )
+            ),
+            candidate_id=evidence.get(
+                "candidate_id"
+            ),
+            severity=evidence.get(
+                "severity"
+            ),
+            data=evidence.get(
+                "data",
+                {},
+            ),
+        )
+
+        return item.evidence_id
+
     def _sync_evidence(
         self,
         state: AgentState,
@@ -966,6 +1274,38 @@ class AgentOrchestrator:
         state.evidence = (
             self.evidence.as_dicts()
         )
+
+    def _fail_state(
+        self,
+        state: AgentState,
+        exc: Exception,
+    ) -> AgentState:
+        state.errors.append(
+            str(exc)
+        )
+
+        state.status = (
+            RunStatus.FAILED
+        )
+
+        if can_transition(
+            state.stage,
+            AgentStage.FAILED,
+        ):
+            transition(
+                state,
+                AgentStage.FAILED,
+                (
+                    "Fatal orchestration error: "
+                    f"{exc}"
+                ),
+            )
+
+        self._sync_evidence(
+            state
+        )
+
+        return state
 
     @staticmethod
     def _event(
@@ -987,6 +1327,8 @@ class AgentOrchestrator:
             message=message,
             tool_name=tool_name,
             candidate_id=candidate_id,
-            evidence_ids=evidence_ids or [],
+            evidence_ids=(
+                evidence_ids or []
+            ),
             data=data or {},
         )

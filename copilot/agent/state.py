@@ -248,6 +248,10 @@ class AgentState(BaseModel):
         default_factory=list
     )
 
+    working_memory: list[dict[str, Any]] = Field(
+        default_factory=list
+    )
+
     diagnosis: Diagnosis | None = None
 
     candidates: list[dict[str, Any]] = Field(

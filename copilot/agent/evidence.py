@@ -25,7 +25,12 @@ class EvidenceItem(BaseModel):
 
 class EvidenceStore:
     def __init__(self) -> None:
-        self._items: list[EvidenceItem] = []
+        self._items: list[
+            EvidenceItem
+        ] = []
+
+    def reset(self) -> None:
+        self._items = []
 
     def add(
         self,
@@ -53,7 +58,9 @@ class EvidenceStore:
             data=data or {},
         )
 
-        self._items.append(item)
+        self._items.append(
+            item
+        )
 
         return item
 
@@ -62,17 +69,24 @@ class EvidenceStore:
         evidence_id: str,
     ) -> EvidenceItem | None:
         for item in self._items:
-            if item.evidence_id == evidence_id:
+            if (
+                item.evidence_id
+                == evidence_id
+            ):
                 return item
 
         return None
 
-    def all(self) -> list[EvidenceItem]:
+    def all(
+        self,
+    ) -> list[EvidenceItem]:
         return list(
             self._items
         )
 
-    def ids(self) -> list[str]:
+    def ids(
+        self,
+    ) -> list[str]:
         return [
             item.evidence_id
             for item in self._items
@@ -83,5 +97,6 @@ class EvidenceStore:
     ) -> list[dict[str, Any]]:
         return [
             item.model_dump()
-            for item in self._items
+            for item
+            in self._items
         ]

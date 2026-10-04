@@ -1,5 +1,6 @@
 from .gemini_runner import (
     GeminiInvestigator,
+    InvestigationRunResult,
 )
 from .orchestrator import (
     AgentOrchestrator,
@@ -13,6 +14,7 @@ from .state import (
 __all__ = [
     "AgentOrchestrator",
     "GeminiInvestigator",
+    "InvestigationRunResult",
     "AgentStage",
     "AgentState",
     "RunStatus",

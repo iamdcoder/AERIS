@@ -23,6 +23,18 @@ class GeminiToolCall(BaseModel):
 
     result_summary: str | None = None
 
+    result_data: dict[str, Any] = Field(
+        default_factory=dict
+    )
+
+    evidence: list[dict[str, Any]] = Field(
+        default_factory=list
+    )
+
+    warnings: list[str] = Field(
+        default_factory=list
+    )
+
     error_code: str | None = None
 
 
@@ -48,11 +60,8 @@ class GeminiClient:
     """
     Controlled Gemini function-calling client.
 
-    The Gemini client itself has no aviation permissions.
-    Those are enforced by the registry supplied to `run()`.
-
-    The application manually executes requested tools so that
-    AERIS can enforce policy, budgets, auditing and failure handling.
+    The client is provider-specific.
+    AERIS policy is enforced by the registry passed to run().
     """
 
     def __init__(
@@ -68,7 +77,7 @@ class GeminiClient:
             model
             or os.getenv(
                 "GEMINI_MODEL",
-                "gemini-3.8-flash",
+                "gemini-2.5-flash",
             )
         )
 
@@ -122,21 +131,6 @@ class GeminiClient:
 
         return genai.Client(
             api_key=resolved_key
-        )
-
-    @staticmethod
-    def _build_tool_declarations(
-        registry: Any,
-    ) -> list[dict[str, Any]]:
-        """
-        Use the provider-neutral declarations exposed by
-        the guarded registry.
-
-        Gemini accepts function declarations containing name,
-        description and JSON-schema-like parameters.
-        """
-        return (
-            registry.function_declarations()
         )
 
     @staticmethod
@@ -233,6 +227,47 @@ class GeminiClient:
             text_parts
         ).strip()
 
+    @staticmethod
+    def _build_gemini_tools(
+        registry: Any,
+    ) -> list[Any]:
+        try:
+            from google.genai import types
+        except ImportError as exc:
+            raise GeminiConfigurationError(
+                "google-genai is not installed."
+            ) from exc
+
+        declarations = []
+
+        for definition in (
+            registry.function_declarations()
+        ):
+            declarations.append(
+                types.FunctionDeclaration(
+                    name=definition[
+                        "name"
+                    ],
+                    description=definition[
+                        "description"
+                    ],
+                    parameters=definition[
+                        "parameters"
+                    ],
+                )
+            )
+
+        if not declarations:
+            return []
+
+        return [
+            types.Tool(
+                function_declarations=(
+                    declarations
+                )
+            )
+        ]
+
     def run(
         self,
         *,
@@ -243,7 +278,8 @@ class GeminiClient:
         """
         Execute a controlled manual function-calling loop.
 
-        The supplied registry is expected to enforce AERIS policy.
+        The application executes every requested function through
+        the supplied registry.
         """
 
         try:
@@ -256,11 +292,19 @@ class GeminiClient:
                 ],
             )
 
-        tool_declarations = (
-            self._build_tool_declarations(
-                registry
+        try:
+            tools = (
+                self._build_gemini_tools(
+                    registry
+                )
             )
-        )
+        except Exception as exc:
+            return GeminiRunResult(
+                status="FAILED",
+                errors=[
+                    str(exc)
+                ],
+            )
 
         contents: list[Any] = [
             types.Content(
@@ -288,13 +332,7 @@ class GeminiClient:
             ):
                 config = (
                     types.GenerateContentConfig(
-                        tools=[
-                            {
-                                "function_declarations": (
-                                    tool_declarations
-                                )
-                            }
-                        ],
+                        tools=tools,
                         system_instruction=(
                             system_instruction
                         ),
@@ -363,15 +401,13 @@ class GeminiClient:
                         None,
                     )
 
-                    raw_arguments = getattr(
-                        function_call,
-                        "args",
-                        {},
-                    )
-
                     try:
                         arguments = dict(
-                            raw_arguments
+                            getattr(
+                                function_call,
+                                "args",
+                                {},
+                            )
                             or {}
                         )
                     except (
@@ -380,7 +416,7 @@ class GeminiClient:
                     ) as exc:
                         arguments = {}
 
-                        tool_call = (
+                        failed_call = (
                             GeminiToolCall(
                                 call_id=call_id,
                                 name=call_name,
@@ -396,7 +432,7 @@ class GeminiClient:
                         )
 
                         tool_calls.append(
-                            tool_call
+                            failed_call
                         )
 
                         function_response_parts.append(
@@ -407,8 +443,8 @@ class GeminiClient:
                                     "error_code": (
                                         "INVALID_TOOL_ARGUMENTS"
                                     ),
-                                    "error_message": (
-                                        str(exc)
+                                    "error_message": str(
+                                        exc
                                     ),
                                 },
                             )
@@ -428,6 +464,21 @@ class GeminiClient:
                             message
                         )
 
+                        function_response_parts.append(
+                            types.Part.from_function_response(
+                                name=call_name,
+                                response={
+                                    "ok": False,
+                                    "error_code": (
+                                        "TOOL_CALL_BUDGET_EXCEEDED"
+                                    ),
+                                    "error_message": (
+                                        message
+                                    ),
+                                },
+                            )
+                        )
+
                         return GeminiRunResult(
                             status="DEGRADED",
                             final_text="",
@@ -443,7 +494,7 @@ class GeminiClient:
                         )
                     )
 
-                    tool_call = (
+                    call_record = (
                         GeminiToolCall(
                             call_id=call_id,
                             name=call_name,
@@ -452,6 +503,15 @@ class GeminiClient:
                             result_summary=(
                                 result.summary
                             ),
+                            result_data=(
+                                result.data
+                            ),
+                            evidence=(
+                                result.evidence
+                            ),
+                            warnings=(
+                                result.warnings
+                            ),
                             error_code=(
                                 result.error_code
                             ),
@@ -459,7 +519,7 @@ class GeminiClient:
                     )
 
                     tool_calls.append(
-                        tool_call
+                        call_record
                     )
 
                     function_response_parts.append(
@@ -508,7 +568,7 @@ class GeminiClient:
             return GeminiRunResult(
                 status="FAILED",
                 final_text="",
-                rounds=len(tool_calls),
+                rounds=0,
                 tool_calls=tool_calls,
                 errors=errors,
             )
