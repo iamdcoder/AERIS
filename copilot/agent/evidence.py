@@ -5,13 +5,22 @@ from pydantic import BaseModel, Field
 
 class EvidenceItem(BaseModel):
     evidence_id: str
+
     kind: str
+
     title: str
+
     summary: str
+
     source: str
+
     candidate_id: str | None = None
+
     severity: str | None = None
-    data: dict[str, Any] = Field(default_factory=dict)
+
+    data: dict[str, Any] = Field(
+        default_factory=dict
+    )
 
 
 class EvidenceStore:
@@ -29,7 +38,9 @@ class EvidenceStore:
         severity: str | None = None,
         data: dict[str, Any] | None = None,
     ) -> EvidenceItem:
-        evidence_id = f"E{len(self._items) + 1:03d}"
+        evidence_id = (
+            f"E{len(self._items) + 1:03d}"
+        )
 
         item = EvidenceItem(
             evidence_id=evidence_id,
@@ -46,7 +57,10 @@ class EvidenceStore:
 
         return item
 
-    def get(self, evidence_id: str) -> EvidenceItem | None:
+    def get(
+        self,
+        evidence_id: str,
+    ) -> EvidenceItem | None:
         for item in self._items:
             if item.evidence_id == evidence_id:
                 return item
@@ -54,10 +68,20 @@ class EvidenceStore:
         return None
 
     def all(self) -> list[EvidenceItem]:
-        return list(self._items)
+        return list(
+            self._items
+        )
 
     def ids(self) -> list[str]:
         return [
             item.evidence_id
+            for item in self._items
+        ]
+
+    def as_dicts(
+        self,
+    ) -> list[dict[str, Any]]:
+        return [
+            item.model_dump()
             for item in self._items
         ]

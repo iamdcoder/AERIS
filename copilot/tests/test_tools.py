@@ -1,4 +1,7 @@
-from copilot.mock_engine import MockEngineClient
+from copilot.mock_engine import (
+    MockEngineClient,
+)
+
 from copilot.tools import (
     ToolRegistry,
     build_default_registry,
@@ -6,7 +9,9 @@ from copilot.tools import (
 
 
 def test_mock_engine_loads_deterministic_state():
-    engine = MockEngineClient()
+    engine = (
+        MockEngineClient()
+    )
 
     first = engine.get_state()
     second = engine.get_state()
@@ -25,10 +30,14 @@ def test_mock_engine_loads_deterministic_state():
 
 
 def test_mock_engine_returns_five_candidates():
-    engine = MockEngineClient()
+    engine = (
+        MockEngineClient()
+    )
 
     candidates = (
-        engine.get_alternatives("F102")
+        engine.get_alternatives(
+            "F102"
+        )
     )
 
     assert len(candidates) == 5
@@ -46,7 +55,9 @@ def test_mock_engine_returns_five_candidates():
 
 
 def test_mock_engine_does_not_expose_mutable_internal_state():
-    engine = MockEngineClient()
+    engine = (
+        MockEngineClient()
+    )
 
     state = engine.get_state()
 
@@ -68,8 +79,57 @@ def test_mock_engine_does_not_expose_mutable_internal_state():
     )
 
 
+def test_weather_tool_returns_weather_cells():
+    registry = (
+        build_default_registry()
+    )
+
+    result = registry.invoke(
+        "get_weather_state"
+    )
+
+    assert result.ok is True
+
+    assert result.data[
+        "weather_cells"
+    ]
+
+    assert (
+        result.data[
+            "weather_cells"
+        ][0]["severity"]
+        == "SEVERE"
+    )
+
+
+def test_restriction_tool_returns_structured_state():
+    registry = (
+        build_default_registry()
+    )
+
+    result = registry.invoke(
+        "get_restrictions"
+    )
+
+    assert result.ok is True
+
+    assert (
+        "restrictions"
+        in result.data
+    )
+
+    assert isinstance(
+        result.data[
+            "restrictions"
+        ],
+        list,
+    )
+
+
 def test_default_registry_contains_expected_tools():
-    registry = build_default_registry()
+    registry = (
+        build_default_registry()
+    )
 
     tool_names = {
         tool.name
@@ -83,6 +143,8 @@ def test_default_registry_contains_expected_tools():
         "get_target_flight",
         "get_sector_state",
         "get_airport_state",
+        "get_weather_state",
+        "get_restrictions",
         "generate_alternatives",
         "validate_candidate",
         "simulate_network_impact",
@@ -92,27 +154,43 @@ def test_default_registry_contains_expected_tools():
 
 
 def test_tool_definitions_are_structured():
-    registry = build_default_registry()
+    registry = (
+        build_default_registry()
+    )
 
     definitions = (
         registry.definitions()
     )
 
-    assert len(definitions) == 10
+    assert len(definitions) == 12
 
     for definition in definitions:
         assert "name" in definition
-        assert "description" in definition
-        assert "parameters" in definition
 
         assert (
-            definition["parameters"]["type"]
+            "description"
+            in definition
+        )
+
+        assert (
+            "parameters"
+            in definition
+        )
+
+        assert (
+            definition[
+                "parameters"
+            ][
+                "type"
+            ]
             == "object"
         )
 
 
 def test_airspace_tool_returns_structured_result():
-    registry = build_default_registry()
+    registry = (
+        build_default_registry()
+    )
 
     result = registry.invoke(
         "get_airspace_state"
@@ -136,7 +214,9 @@ def test_airspace_tool_returns_structured_result():
 
 
 def test_validation_tool_returns_constraint_result():
-    registry = build_default_registry()
+    registry = (
+        build_default_registry()
+    )
 
     result = registry.invoke(
         "validate_candidate",

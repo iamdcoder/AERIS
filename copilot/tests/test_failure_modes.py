@@ -81,3 +81,44 @@ def test_malformed_tool_name_is_contained():
         result.error_code
         == "TOOL_NOT_FOUND"
     )
+
+
+def test_missing_weather_fixture_is_not_silently_invented():
+    registry = (
+        build_default_registry()
+    )
+
+    result = registry.invoke(
+        "get_weather_state"
+    )
+
+    assert result.ok is True
+
+    assert isinstance(
+        result.data[
+            "weather_cells"
+        ],
+        list,
+    )
+
+
+def test_tool_failure_is_structured():
+    registry = (
+        build_default_registry()
+    )
+
+    result = registry.invoke(
+        "get_airport_state",
+        {
+            "airport_id": "UNKNOWN"
+        },
+    )
+
+    assert result.ok is False
+
+    assert (
+        result.error_code
+        == "AIRPORT_NOT_FOUND"
+    )
+
+    assert result.error_message

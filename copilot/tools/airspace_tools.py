@@ -21,7 +21,9 @@ class GetAirspaceStateTool(AerisTool):
         self.engine = engine
 
     @property
-    def parameters(self) -> dict[str, Any]:
+    def parameters(
+        self,
+    ) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {},
@@ -68,7 +70,9 @@ class GetDisruptionsTool(AerisTool):
         self.engine = engine
 
     @property
-    def parameters(self) -> dict[str, Any]:
+    def parameters(
+        self,
+    ) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {},
@@ -118,7 +122,9 @@ class GetTargetFlightTool(AerisTool):
         self.engine = engine
 
     @property
-    def parameters(self) -> dict[str, Any]:
+    def parameters(
+        self,
+    ) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -192,7 +198,9 @@ class GetSectorStateTool(AerisTool):
         self.engine = engine
 
     @property
-    def parameters(self) -> dict[str, Any]:
+    def parameters(
+        self,
+    ) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -245,7 +253,6 @@ class GetSectorStateTool(AerisTool):
                         f"Projected utilization for {sector_id}: "
                         f"{sector.get('projected_utilization', 'N/A')}."
                     ),
-                    "candidate_id": None,
                 }
             ],
         )
@@ -266,7 +273,9 @@ class GetAirportStateTool(AerisTool):
         self.engine = engine
 
     @property
-    def parameters(self) -> dict[str, Any]:
+    def parameters(
+        self,
+    ) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -324,6 +333,114 @@ class GetAirportStateTool(AerisTool):
         )
 
 
+class GetWeatherStateTool(AerisTool):
+    name = "get_weather_state"
+
+    description = (
+        "Retrieve active simulated weather cells, "
+        "severity, movement and uncertainty."
+    )
+
+    def __init__(
+        self,
+        engine: MockEngineClient,
+    ) -> None:
+        self.engine = engine
+
+    @property
+    def parameters(
+        self,
+    ) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+    def execute(
+        self,
+        **kwargs: Any,
+    ) -> ToolResult:
+        weather_cells = (
+            self.engine.get_weather_state()
+        )
+
+        return ToolResult.success(
+            tool_name=self.name,
+            summary=(
+                f"Retrieved {len(weather_cells)} active "
+                "weather cell(s)."
+            ),
+            data={
+                "weather_cells": weather_cells
+            },
+            evidence=[
+                {
+                    "kind": "WEATHER",
+                    "title": "Weather state",
+                    "summary": (
+                        f"{len(weather_cells)} weather cell(s) "
+                        "are available for diagnosis."
+                    ),
+                }
+            ],
+        )
+
+
+class GetRestrictionsTool(AerisTool):
+    name = "get_restrictions"
+
+    description = (
+        "Retrieve active simulated airspace restrictions "
+        "that may invalidate intervention candidates."
+    )
+
+    def __init__(
+        self,
+        engine: MockEngineClient,
+    ) -> None:
+        self.engine = engine
+
+    @property
+    def parameters(
+        self,
+    ) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+    def execute(
+        self,
+        **kwargs: Any,
+    ) -> ToolResult:
+        restrictions = (
+            self.engine.get_restrictions()
+        )
+
+        return ToolResult.success(
+            tool_name=self.name,
+            summary=(
+                f"Retrieved {len(restrictions)} active "
+                "airspace restriction(s)."
+            ),
+            data={
+                "restrictions": restrictions
+            },
+            evidence=[
+                {
+                    "kind": "RESTRICTION",
+                    "title": "Restriction state",
+                    "summary": (
+                        f"{len(restrictions)} active restriction(s) "
+                        "are available."
+                    ),
+                }
+            ],
+        )
+
+
 def build_airspace_tools(
     engine: MockEngineClient,
 ) -> list[AerisTool]:
@@ -333,4 +450,6 @@ def build_airspace_tools(
         GetTargetFlightTool(engine),
         GetSectorStateTool(engine),
         GetAirportStateTool(engine),
+        GetWeatherStateTool(engine),
+        GetRestrictionsTool(engine),
     ]

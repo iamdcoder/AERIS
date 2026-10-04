@@ -65,6 +65,7 @@
       "forecast_expansion_pct": 20
     }
   ],
+  "restrictions": [],
   "network_summary": {
     "active_aircraft": 48,
     "aircraft_in_holding": 4,
