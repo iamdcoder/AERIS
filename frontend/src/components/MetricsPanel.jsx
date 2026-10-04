@@ -5,78 +5,203 @@ function MetricCard({
   tone = "",
 }) {
   return (
-    <div className={`metric-card ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{subvalue}</small>
+    <div
+      className={`metric-card ${tone}`}
+    >
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+
+      <small>
+        {subvalue}
+      </small>
     </div>
   );
 }
+
+
+function formatMinutes(
+  value,
+  prefix = "",
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "—";
+  }
+
+  const number =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      number,
+    )
+  ) {
+    return "—";
+  }
+
+  return `${prefix}${number.toFixed(
+    2,
+  )}m`;
+}
+
+
+function formatPercent(
+  value,
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "—";
+  }
+
+  const number =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      number,
+    )
+  ) {
+    return "—";
+  }
+
+  const ratio =
+    number > 2
+      ? number / 100
+      : number;
+
+  return `${Math.round(
+    ratio * 100,
+  )}%`;
+}
+
 
 export default function MetricsPanel({
   network,
   selectedCandidate,
 }) {
-  const utilizationPct = Math.round(
-    selectedCandidate.peakSectorUtilization * 100
-  );
+  const projectedPeak =
+    selectedCandidate
+      ?.peakSectorUtilization;
+
+  const networkDelta =
+    selectedCandidate
+      ?.networkDelayDeltaMin;
 
   return (
     <section className="panel metrics-panel">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">NETWORK KPIs</span>
-          <h2>Ripple impact</h2>
+          <span className="eyebrow">
+            NETWORK KPIs
+          </span>
+
+          <h2>
+            Ripple impact
+          </h2>
         </div>
 
         <span className="live-indicator">
           <i />
-          SIMULATION
+          DETERMINISTIC
         </span>
       </div>
+
 
       <div className="metrics-grid">
         <MetricCard
           label="Active aircraft"
-          value={network.activeAircraft}
-          subvalue="Tracked"
+          value={
+            network?.activeAircraft ??
+            "—"
+          }
+          subvalue="Current tracked"
         />
+
 
         <MetricCard
           label="Holding"
-          value={network.aircraftInHolding}
-          subvalue="Aircraft"
+          value={
+            network?.aircraftInHolding ??
+            "—"
+          }
+          subvalue="Current aircraft"
           tone="warning"
         />
+
 
         <MetricCard
           label="Stressed sectors"
-          value={network.stressedSectors}
-          subvalue="Current"
+          value={
+            network?.stressedSectors ??
+            "—"
+          }
+          subvalue="Current state"
           tone="warning"
         />
 
+
         <MetricCard
-          label="Network delay"
-          value={`+${network.networkDelayMin}m`}
-          subvalue="Baseline"
+          label="Current network delay"
+          value={
+            formatMinutes(
+              network?.networkDelayMin,
+              network?.networkDelayMin >
+                0
+                ? "+"
+                : "",
+            )
+          }
+          subvalue="Current total"
           tone="negative"
         />
 
+
         <MetricCard
-          label="Peak utilization"
-          value={`${utilizationPct}%`}
-          subvalue={selectedCandidate.id}
+          label="Projected peak"
+          value={
+            formatPercent(
+              projectedPeak,
+            )
+          }
+          subvalue={
+            selectedCandidate?.id
+              ? `${selectedCandidate.id} candidate`
+              : "No candidate selected"
+          }
         />
+
 
         <MetricCard
           label="Network delta"
-          value={`${selectedCandidate.networkDelayDeltaMin > 0 ? "+" : ""}${selectedCandidate.networkDelayDeltaMin}m`}
-          subvalue="Candidate impact"
+          value={
+            formatMinutes(
+              networkDelta,
+              networkDelta >
+                0
+                ? "+"
+                : "",
+            )
+          }
+          subvalue="Selected candidate impact"
           tone={
-            selectedCandidate.networkDelayDeltaMin <= 0
-              ? "positive"
-              : "negative"
+            networkDelta ===
+              null ||
+            networkDelta ===
+              undefined
+              ? ""
+              : networkDelta <=
+                  0
+                ? "positive"
+                : "negative"
           }
         />
       </div>

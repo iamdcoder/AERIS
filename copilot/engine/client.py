@@ -486,6 +486,60 @@ class RealEngineClient:
             return result
 
     def get_stress_result(
+            self,
+            candidate_id: str,
+        ) -> dict[str, Any] | None:
+            with self._lock:
+                candidate = self._resolve_candidate(
+                    candidate_id
+                )
+    
+                if candidate is None:
+                    return None
+    
+                report = public.stress_test_candidate(
+                    candidate
+                )
+    
+                report["candidate_id"] = (
+                    candidate_id
+                )
+    
+                scored = public.score_candidates(
+                    [candidate]
+                )
+    
+                if scored:
+                    report["authoritative_candidate"] = (
+                        deepcopy(
+                            scored[0]
+                        )
+                    )
+    
+                failures = report.get(
+                    "failures"
+                )
+    
+                if failures:
+                    report["critical_failure"] = (
+                        failures[0].get(
+                            "reason"
+                        )
+                    )
+    
+                key = (
+                    candidate["flight_id"],
+                    candidate_id,
+                )
+    
+                self._candidates[key][
+                    "stress_report"
+                ] = deepcopy(
+                    report
+                )
+    
+                return report
+    def get_stress_result(
         self,
         candidate_id: str,
     ) -> dict[str, Any] | None:
@@ -516,6 +570,25 @@ class RealEngineClient:
                     )
                 )
 
+            try:
+                scored_candidates = (
+                    public.score_candidates(
+                        [candidate]
+                    )
+                )
+
+                if scored_candidates:
+                    report[
+                        "authoritative_candidate"
+                    ] = deepcopy(
+                        scored_candidates[0]
+                    )
+
+            except Exception:
+                # Stress testing must remain usable even when
+                # authoritative scoring is unavailable.
+                pass
+
             key = (
                 candidate["flight_id"],
                 candidate_id,
@@ -523,7 +596,9 @@ class RealEngineClient:
 
             self._candidates[key][
                 "stress_report"
-            ] = deepcopy(report)
+            ] = deepcopy(
+                report
+            )
 
             return report
 

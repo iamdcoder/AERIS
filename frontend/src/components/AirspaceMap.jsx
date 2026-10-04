@@ -42,22 +42,95 @@ function Aircraft({
 function sectorUtilization(
   sector,
 ) {
-  const raw =
+  const direct =
     Number(
       sector?.utilization_pct ??
-        sector?.projected_utilization ??
-        0,
+        sector?.projected_utilization,
     );
 
+  const forecast =
+    Number(
+      sector?.forecast_traffic,
+    );
+
+  const capacity =
+    Number(
+      sector?.capacity,
+    );
+
+  const directRatio =
+    Number.isFinite(
+      direct,
+    )
+      ? direct <= 2
+        ? direct
+        : direct / 100
+      : null;
+
+  const forecastRatio =
+    Number.isFinite(
+      forecast,
+    ) &&
+    Number.isFinite(
+      capacity,
+    ) &&
+    capacity > 0
+      ? forecast /
+        capacity
+      : null;
+
   if (
-    !Number.isFinite(raw)
+    directRatio ===
+      null &&
+    forecastRatio ===
+      null
   ) {
     return 0;
   }
 
-  return raw <= 2
-    ? raw * 100
-    : raw;
+  if (
+    directRatio ===
+    null
+  ) {
+    return forecastRatio;
+  }
+
+  if (
+    forecastRatio ===
+    null
+  ) {
+    return directRatio;
+  }
+
+  return Math.max(
+    directRatio,
+    forecastRatio,
+  );
+}
+
+
+function isStressed(
+  sector,
+) {
+  const status =
+    String(
+      sector?.status ||
+        "",
+    ).toUpperCase();
+
+  return (
+    [
+      "STRESSED",
+      "CONGESTED",
+      "OVERLOADED",
+      "CRITICAL",
+    ].includes(
+      status,
+    ) ||
+    sectorUtilization(
+      sector,
+    ) >= 0.85
+  );
 }
 
 
@@ -76,28 +149,39 @@ export default function AirspaceMap({
         ? "route-c"
         : "route-d";
 
-  const firstSector =
-    sectors[0] || {};
+  const rankedSectors =
+    [
+      ...sectors,
+    ].sort(
+      (a, b) =>
+        sectorUtilization(
+          b,
+        ) -
+        sectorUtilization(
+          a,
+        ),
+    );
 
-  const secondSector =
-    sectors[1] || {};
+  const primarySector =
+    rankedSectors[0] ||
+    {};
+
+  const secondarySector =
+    rankedSectors[1] ||
+    {};
+
+  const tertiarySector =
+    rankedSectors[2] ||
+    {};
 
   const weatherCell =
-    weather[0] || {};
+    weather[0] ||
+    {};
 
-  const firstUtilization =
-    Math.round(
-      sectorUtilization(
-        firstSector,
-      ),
-    );
-
-  const secondUtilization =
-    Math.round(
-      sectorUtilization(
-        secondSector,
-      ),
-    );
+  const stressedCount =
+    sectors.filter(
+      isStressed,
+    ).length;
 
   return (
     <section className="panel map-panel">
@@ -210,11 +294,20 @@ export default function AirspaceMap({
           />
 
           <text
-            x="215"
+            x="205"
             y="255"
             className="sector-label"
           >
-            {sectors[0]?.id || "S3"}
+            {primarySector.id ||
+              "S3"}
+            {" · "}
+            {Math.round(
+              sectorUtilization(
+                primarySector,
+              ) *
+                100,
+            )}
+            %
           </text>
 
           <text
@@ -222,9 +315,16 @@ export default function AirspaceMap({
             y="245"
             className="sector-label stressed"
           >
-            {firstSector.id || "S4"}
+            {secondarySector.id ||
+              "S4"}
             {" · "}
-            {firstUtilization || 0}%
+            {Math.round(
+              sectorUtilization(
+                secondarySector,
+              ) *
+                100,
+            )}
+            %
           </text>
 
           <text
@@ -232,9 +332,16 @@ export default function AirspaceMap({
             y="255"
             className="sector-label critical"
           >
-            {secondSector.id || "S5"}
+            {tertiarySector.id ||
+              "S5"}
             {" · "}
-            {secondUtilization || 0}%
+            {Math.round(
+              sectorUtilization(
+                tertiarySector,
+              ) *
+                100,
+            )}
+            %
           </text>
 
           <polygon
@@ -315,44 +422,47 @@ export default function AirspaceMap({
           <Aircraft
             x={145}
             y={220}
-            label="F081"
+            label="AI081"
           />
 
           <Aircraft
             x={230}
             y={330}
-            label="F207"
+            label="AI207"
           />
 
           <Aircraft
             x={350}
             y={155}
-            label="F143"
+            label="AI143"
           />
 
           <Aircraft
             x={470}
             y={210}
-            label={targetFlightId}
+            label={
+              targetFlightId ||
+              "F102"
+            }
             highlighted
           />
 
           <Aircraft
             x={585}
             y={310}
-            label="F099"
+            label="AI099"
           />
 
           <Aircraft
             x={685}
             y={190}
-            label="F311"
+            label="AI311"
           />
 
           <Aircraft
             x={755}
             y={350}
-            label="F186"
+            label="AI186"
           />
 
           <circle
@@ -392,7 +502,10 @@ export default function AirspaceMap({
             >
               Network pressure
               {" · "}
-              {sectors.length} stressed
+              {stressedCount}
+              {" "}
+              stressed
+              {" "}
               sector(s)
             </text>
           </g>

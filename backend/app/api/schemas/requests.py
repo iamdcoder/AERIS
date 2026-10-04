@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+)
 
 
 class FlightIdRequest(BaseModel):
@@ -29,8 +33,9 @@ class CandidateRequest(BaseModel):
 
     intervention_type: str = "reroute"
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(
+        extra="allow"
+    )
 
 
 class DecisionScoreRequest(BaseModel):
@@ -73,13 +78,23 @@ class CopilotRequest(BaseModel):
     )
 
     scenario_id: str = Field(
-        "mumbai_weather_crisis",
+        "mumbai_weather_crisis_v2",
         description="Scenario identifier",
     )
 
     run_id: str = Field(
         "RUN-001",
         description="Run execution identifier",
+    )
+
+    decision_time_min: int = Field(
+        19,
+        ge=0,
+        le=240,
+        description=(
+            "Deterministic simulation time at which "
+            "AERIS should make the decision."
+        ),
     )
 
 
@@ -91,7 +106,9 @@ class CopilotApprovalRequest(BaseModel):
 
     decided_by: str = Field(
         "human_dispatcher",
-        description="Human decision-maker identifier",
+        description=(
+            "Human decision-maker identifier"
+        ),
     )
 
 
@@ -104,10 +121,14 @@ class CopilotRejectionRequest(BaseModel):
     reason: str = Field(
         ...,
         min_length=1,
-        description="Reason supplied by the human operator",
+        description=(
+            "Reason supplied by the human operator"
+        ),
     )
 
     decided_by: str = Field(
         "human_dispatcher",
-        description="Human decision-maker identifier",
+        description=(
+            "Human decision-maker identifier"
+        ),
     )

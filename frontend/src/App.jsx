@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useState,
 } from "react";
 
@@ -10,6 +9,8 @@ import CandidateCards from "./components/CandidateCards";
 import ComparisonTable from "./components/ComparisonTable";
 import MetricsPanel from "./components/MetricsPanel";
 import AgentDecisionTrail from "./components/AgentDecisionTrail";
+import DecisionEvidencePanel from "./components/DecisionEvidencePanel";
+import CriticChallengePanel from "./components/CriticChallengePanel";
 import ApprovalPanel from "./components/ApprovalPanel";
 import VerificationPanel from "./components/VerificationPanel";
 import FlightDetail from "./components/FlightDetail";
@@ -30,26 +31,39 @@ import {
 } from "./lib/dashboardAdapter";
 
 
+const FLAGSHIP_SCENARIO_ID =
+  "mumbai_weather_crisis_v2";
+
+const FLAGSHIP_DECISION_TIME_MIN =
+  19;
+
+const TARGET_FLIGHT_ID =
+  "F102";
+
+
 const EMPTY_CANDIDATE = {
   id: "—",
   feasible: false,
   localScore: null,
   decisionScore: null,
-  targetDelayMin: 0,
-  networkDelayDeltaMin: 0,
-  peakSectorUtilization: 0,
+  targetDelayMin: null,
+  networkDelayDeltaMin: null,
+  peakSectorUtilization: null,
   resilience: 0,
   stressSurvival: 0,
   stressTotal: 0,
-  affectedFlights: 0,
+  affectedFlights: null,
   fuelMarginKg: null,
   fuelMarginMin: null,
-  extraDistanceKm: 0,
-  label: "Awaiting AERIS investigation",
-  interventionType: "NONE",
+  extraDistanceKm: null,
+  label:
+    "Awaiting AERIS investigation",
+  interventionType:
+    "NONE",
   summary:
     "Run AERIS to investigate the current airspace state.",
   rejectionReason: null,
+  operatorRejected: false,
 };
 
 
@@ -59,6 +73,23 @@ function Header({
   onRun,
   disabled,
 }) {
+  const running =
+    phase ===
+    "RUNNING";
+
+  const completed =
+    phase ===
+    "COMPLETE";
+
+  const failed =
+    phase ===
+    "FAILED";
+
+  const waiting =
+    phase ===
+    "WAITING_APPROVAL";
+
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -77,6 +108,7 @@ function Header({
         </div>
       </div>
 
+
       <div className="header-center">
         <span className="header-title">
           AIRSPACE RESILIENCE COMMAND CENTER
@@ -84,26 +116,50 @@ function Header({
 
         <span className="header-scenario">
           MUMBAI WEATHER CRISIS
+          {" · "}
+          DECISION T+
+          {String(
+            FLAGSHIP_DECISION_TIME_MIN,
+          ).padStart(
+            2,
+            "0",
+          )}
         </span>
       </div>
+
 
       <div className="header-actions">
         <div className="system-state">
           <span />
-          {mode}
+
+          {running
+            ? "ORCHESTRATING"
+            : phase ===
+                "WAITING_APPROVAL"
+              ? "WAITING HUMAN"
+              : mode}
         </div>
+
 
         <button
           type="button"
           className="run-button"
-          disabled={disabled}
-          onClick={onRun}
+          disabled={
+            disabled
+          }
+          onClick={
+            onRun
+          }
         >
-          {phase === "RUNNING"
+          {running
             ? "AERIS RUNNING..."
-            : phase === "COMPLETE"
-              ? "RERUN AERIS"
-              : "RUN AERIS"}
+            : waiting
+              ? "DECISION READY"
+              : completed
+                ? "RERUN AERIS"
+                : failed
+                  ? "RETRY AERIS"
+                  : "RUN AERIS"}
         </button>
       </div>
     </header>
@@ -115,22 +171,63 @@ function RecommendationBanner({
   candidate,
   recommendation,
   approvalStatus,
+  verificationStatus,
+  isReassessment,
+  rejectedCandidateId,
 }) {
   const hasRecommendation =
     Boolean(
-      recommendation &&
-        recommendation.candidateId,
+      recommendation?.candidateId,
     );
+
+
+  let approvalText =
+    "HUMAN APPROVAL · NOT RUN";
+
+
+  if (
+    hasRecommendation
+  ) {
+    if (
+      isReassessment
+    ) {
+      approvalText =
+        `PREVIOUSLY REJECTED ${
+          rejectedCandidateId ||
+          "CANDIDATE"
+        } · NEW APPROVAL PENDING`;
+    } else {
+      approvalText =
+        `HUMAN APPROVAL · ${approvalStatus}`;
+    }
+  }
+
+
+  const verificationText =
+    verificationStatus ===
+      "VERIFIED" &&
+    !isReassessment
+      ? " · VERIFIED"
+      : "";
+
+
+  const recommendationSummary =
+    recommendation?.summary ||
+    candidate?.summary ||
+    "No recommendation has been produced yet. Run the investigation to activate the decision pipeline.";
+
 
   return (
     <section className="recommendation-banner">
       <div className="recommendation-main">
         <div className="recommendation-kicker">
           <span />
+
           {hasRecommendation
             ? "AERIS RECOMMENDATION"
             : "AERIS COMMAND CENTER"}
         </div>
+
 
         <div className="recommendation-title-row">
           <h1>
@@ -142,28 +239,55 @@ function RecommendationBanner({
           </span>
         </div>
 
+
         <p>
-          {hasRecommendation
-            ? recommendation.summary
-            : "No recommendation has been produced yet. Run the investigation to activate the decision pipeline."}
+          {recommendationSummary}
         </p>
       </div>
+
 
       <div className="recommendation-stats">
         <div>
           <span>
-            Decision score
+            Target impact
           </span>
 
           <strong>
-            {candidate.decisionScore ===
+            {candidate.targetDelayMin ===
             null
               ? "—"
-              : Number(
-                    candidate.decisionScore,
-                  ).toFixed(2)}
+              : `${
+                  candidate.targetDelayMin >
+                  0
+                    ? "+"
+                    : ""
+                }${candidate.targetDelayMin.toFixed(
+                  2,
+                )} min`}
           </strong>
         </div>
+
+
+        <div>
+          <span>
+            Network ripple
+          </span>
+
+          <strong>
+            {candidate.networkDelayDeltaMin ===
+            null
+              ? "—"
+              : `${
+                  candidate.networkDelayDeltaMin >
+                  0
+                    ? "+"
+                    : ""
+                }${candidate.networkDelayDeltaMin.toFixed(
+                  2,
+                )} min`}
+          </strong>
+        </div>
+
 
         <div>
           <span>
@@ -171,11 +295,15 @@ function RecommendationBanner({
           </span>
 
           <strong>
-            {candidate.resilience.toFixed(
+            {Number(
+              candidate.resilience ||
+                0,
+            ).toFixed(
               2,
             )}
           </strong>
         </div>
+
 
         <div>
           <span>
@@ -188,18 +316,14 @@ function RecommendationBanner({
               : "—"}
           </strong>
         </div>
+      </div>
 
-        <div>
-          <span>
-            Approval
-          </span>
 
-          <strong>
-            {hasRecommendation
-              ? approvalStatus
-              : "NOT RUN"}
-          </strong>
-        </div>
+      <div className="recommendation-footer">
+        <span>
+          {approvalText}
+          {verificationText}
+        </span>
       </div>
     </section>
   );
@@ -233,6 +357,7 @@ function ErrorBanner({
     return null;
   }
 
+
   return (
     <section className="error-banner">
       <div>
@@ -245,9 +370,12 @@ function ErrorBanner({
         </span>
       </div>
 
+
       <button
         type="button"
-        onClick={onRetry}
+        onClick={
+          onRetry
+        }
       >
         RETRY
       </button>
@@ -260,59 +388,83 @@ function App() {
   const [
     dashboard,
     setDashboard,
-  ] = useState(null);
+  ] = useState(
+    null,
+  );
+
 
   const [
     agentState,
     setAgentState,
-  ] = useState(null);
+  ] = useState(
+    null,
+  );
+
 
   const [
     selectedCandidateId,
     setSelectedCandidateId,
-  ] = useState(null);
+  ] = useState(
+    null,
+  );
+
 
   const [
     busy,
     setBusy,
-  ] = useState(false);
+  ] = useState(
+    false,
+  );
+
 
   const [
     error,
     setError,
-  ] = useState("");
+  ] = useState(
+    "",
+  );
+
 
   useEffect(() => {
     loadBaseline();
   }, []);
 
+
   async function loadBaseline() {
     setError("");
 
+
     const result =
       await fetchBaseline(
-        "F102",
+        TARGET_FLIGHT_ID,
       );
+
 
     if (!result.ok) {
       setError(
-        result.error,
+        result.error ||
+          "Unable to load the AERIS baseline.",
       );
+
       return;
     }
+
 
     const baseline =
       normalizeBaseline(
         result.data,
       );
 
+
     setDashboard(
       baseline,
     );
 
+
     setAgentState(
       null,
     );
+
 
     setSelectedCandidateId(
       null,
@@ -325,66 +477,105 @@ function App() {
       return;
     }
 
-    setBusy(true);
+
+    setBusy(
+      true,
+    );
+
     setError("");
+
+
+    setAgentState(
+      null,
+    );
+
+
+    setSelectedCandidateId(
+      null,
+    );
+
 
     const reset =
       await resetCopilot();
 
+
     if (!reset.ok) {
-      setBusy(false);
+      setBusy(
+        false,
+      );
+
+
       setError(
         reset.error ||
           "Unable to reset the AERIS simulation.",
       );
+
+
       return;
     }
 
+
     const runId =
       `WEB-${Date.now()}`;
+
 
     const result =
       await runCopilotRecommendation(
         {
           target_flight_id:
-            "F102",
+            TARGET_FLIGHT_ID,
 
           scenario_id:
-            "mumbai_weather_crisis",
+            FLAGSHIP_SCENARIO_ID,
+
+          decision_time_min:
+            FLAGSHIP_DECISION_TIME_MIN,
 
           run_id:
             runId,
         },
       );
 
-    setBusy(false);
+
+    setBusy(
+      false,
+    );
+
 
     if (!result.ok) {
       setError(
         result.error ||
           "AERIS recommendation failed.",
       );
+
+
       return;
     }
+
 
     const state =
       result.data;
 
+
     setAgentState(
       state,
     );
+
 
     const normalized =
       normalizeAgentState(
         state,
       );
 
+
     setDashboard(
       normalized,
     );
 
+
     setSelectedCandidateId(
-      normalized.recommendation
+      normalized
+        .recommendation
         ?.candidateId ||
         null,
     );
@@ -399,8 +590,13 @@ function App() {
       return;
     }
 
-    setBusy(true);
+
+    setBusy(
+      true,
+    );
+
     setError("");
+
 
     const result =
       await approveCopilotRun(
@@ -413,31 +609,42 @@ function App() {
         },
       );
 
-    setBusy(false);
+
+    setBusy(
+      false,
+    );
+
 
     if (!result.ok) {
       setError(
         result.error ||
           "Approval failed.",
       );
+
+
       return;
     }
+
 
     setAgentState(
       result.data,
     );
+
 
     const normalized =
       normalizeAgentState(
         result.data,
       );
 
+
     setDashboard(
       normalized,
     );
 
+
     setSelectedCandidateId(
-      normalized.recommendation
+      normalized
+        .recommendation
         ?.candidateId ||
         selectedCandidateId,
     );
@@ -445,19 +652,26 @@ function App() {
 
 
   async function handleReject(
-    reason,
+    rejectionReason,
   ) {
     const cleanReason =
       String(
-        reason || "",
+        rejectionReason ||
+          "",
       ).trim();
 
-    if (!cleanReason) {
+
+    if (
+      !cleanReason
+    ) {
       window.alert(
         "A rejection reason is required.",
       );
+
+
       return;
     }
+
 
     if (
       !agentState ||
@@ -466,8 +680,13 @@ function App() {
       return;
     }
 
-    setBusy(true);
+
+    setBusy(
+      true,
+    );
+
     setError("");
+
 
     const result =
       await rejectCopilotRun(
@@ -483,31 +702,42 @@ function App() {
         },
       );
 
-    setBusy(false);
+
+    setBusy(
+      false,
+    );
+
 
     if (!result.ok) {
       setError(
         result.error ||
           "Recommendation rejection failed.",
       );
+
+
       return;
     }
+
 
     setAgentState(
       result.data,
     );
+
 
     const normalized =
       normalizeAgentState(
         result.data,
       );
 
+
     setDashboard(
       normalized,
     );
 
+
     setSelectedCandidateId(
-      normalized.recommendation
+      normalized
+        .recommendation
         ?.candidateId ||
         null,
     );
@@ -524,12 +754,15 @@ function App() {
           candidateId,
       );
 
+
     if (
       !candidate ||
-      !candidate.feasible
+      !candidate.feasible ||
+      candidate.operatorRejected
     ) {
       return;
     }
+
 
     setSelectedCandidateId(
       candidateId,
@@ -561,36 +794,59 @@ function App() {
     "PENDING";
 
 
-  const phase =
+  let phase =
+    "IDLE";
+
+
+  if (
     busy
-      ? "RUNNING"
-      : !agentState
-        ? "IDLE"
-        : dashboard?.agentStage ===
-            "HUMAN_APPROVAL"
-          ? "WAITING_APPROVAL"
-          : dashboard?.agentStage ===
-              "VERIFY"
-            ? "COMPLETE"
-            : dashboard?.agentStage ===
-                "HUMAN_APPROVAL"
-              ? "WAITING_APPROVAL"
-              : dashboard?.agentStage ===
-                  "FAILED"
-                ? "FAILED"
-                : "COMPLETE";
+  ) {
+    phase =
+      "RUNNING";
+  } else if (
+    !agentState
+  ) {
+    phase =
+      "IDLE";
+  } else if (
+    dashboard?.isReassessment ||
+    dashboard?.agentStage ===
+      "HUMAN_APPROVAL"
+  ) {
+    phase =
+      "WAITING_APPROVAL";
+  } else if (
+    dashboard?.verificationStatus ===
+    "VERIFIED"
+  ) {
+    phase =
+      "COMPLETE";
+  } else if (
+    dashboard?.agentStage ===
+    "FAILED"
+  ) {
+    phase =
+      "FAILED";
+  } else {
+    phase =
+      "COMPLETE";
+  }
 
 
-  const uiReady =
+  const waitingForApproval =
     Boolean(
       agentState &&
         dashboard?.agentStage ===
           "HUMAN_APPROVAL" &&
-        dashboard?.recommendation,
+        dashboard?.recommendation &&
+        approvalStatus ===
+          "PENDING",
     );
 
 
-  if (!dashboard) {
+  if (
+    !dashboard
+  ) {
     return (
       <div className="app-shell">
         <LoadingScreen />
@@ -616,6 +872,7 @@ function App() {
         }
       />
 
+
       <main className="command-center">
         <ErrorBanner
           message={
@@ -626,6 +883,7 @@ function App() {
           }
         />
 
+
         <section className="operational-strip">
           <div>
             <span className="eyebrow">
@@ -634,12 +892,24 @@ function App() {
 
             <strong>
               {busy
-                ? "AERIS investigating..."
-                : agentState
-                  ? agentState.status
-                  : "Operational simulation ready"}
+                ? "AERIS INVESTIGATING..."
+                : dashboard.isReassessment
+                  ? "WAITING HUMAN"
+                  : dashboard.verificationStatus ===
+                      "VERIFIED"
+                    ? "VERIFIED"
+                    : agentState
+                      ? String(
+                          agentState.status ||
+                            "READY",
+                        ).replaceAll(
+                          "_",
+                          " ",
+                        )
+                      : "OPERATIONAL SIMULATION READY"}
             </strong>
           </div>
+
 
           <div>
             <span className="eyebrow">
@@ -647,9 +917,22 @@ function App() {
             </span>
 
             <strong>
-              {dashboard.targetFlight.callsign}
+              {
+                dashboard
+                  .targetFlight
+                  .callsign
+              }
+
+              {" · "}
+
+              {
+                dashboard
+                  .targetFlight
+                  .id
+              }
             </strong>
           </div>
+
 
           <div>
             <span className="eyebrow">
@@ -658,10 +941,12 @@ function App() {
 
             <strong className="text-high">
               {agentState
-                ?.diagnosis?.urgency ||
+                ?.diagnosis
+                ?.urgency ||
                 "HIGH"}
             </strong>
           </div>
+
 
           <div>
             <span className="eyebrow">
@@ -679,16 +964,20 @@ function App() {
             </strong>
           </div>
 
+
           <div>
             <span className="eyebrow">
               AIRPORT
             </span>
 
             <strong>
-              {dashboard.airport.id}
+              {
+                dashboard.airport.id
+              }
             </strong>
           </div>
         </section>
+
 
         <RecommendationBanner
           candidate={
@@ -700,7 +989,17 @@ function App() {
           approvalStatus={
             approvalStatus
           }
+          verificationStatus={
+            dashboard.verificationStatus
+          }
+          isReassessment={
+            dashboard.isReassessment
+          }
+          rejectedCandidateId={
+            dashboard.rejectedCandidateId
+          }
         />
+
 
         <div className="dashboard-grid top-grid">
           <div className="main-column">
@@ -709,6 +1008,7 @@ function App() {
                 dashboard.disruption
               }
             />
+
 
             <AirspaceMap
               selectedCandidate={
@@ -726,12 +1026,14 @@ function App() {
             />
           </div>
 
+
           <div className="side-column">
             <FlightDetail
               flight={
                 dashboard.targetFlight
               }
             />
+
 
             <MetricsPanel
               network={
@@ -743,6 +1045,7 @@ function App() {
             />
           </div>
         </div>
+
 
         <div className="dashboard-grid">
           <CandidateCards
@@ -756,6 +1059,7 @@ function App() {
               handleCandidateSelect
             }
           />
+
 
           <AgentDecisionTrail
             currentStage={
@@ -771,16 +1075,17 @@ function App() {
               dashboard.verificationStatus
             }
             rejectedCandidate={
-              dashboard.rawAgentState
-                ?.approval?.decision ===
-              "REJECTED"
-                ? dashboard.rawAgentState
-                    ?.recommendation
-                    ?.candidate_id
-                : null
+              dashboard.rejectedCandidateId
+            }
+            rejectionReason={
+              dashboard.rejectionReason
+            }
+            isReassessment={
+              dashboard.isReassessment
             }
           />
         </div>
+
 
         <ComparisonTable
           candidates={
@@ -791,6 +1096,27 @@ function App() {
           }
         />
 
+
+        {agentState && (
+          <div className="dashboard-grid">
+            <DecisionEvidencePanel
+              candidates={
+                dashboard.candidates
+              }
+              agentState={
+                agentState
+              }
+            />
+
+            <CriticChallengePanel
+              agentState={
+                agentState
+              }
+            />
+          </div>
+        )}
+
+
         {dashboard.recommendation && (
           <div className="dashboard-grid lower-grid">
             <ApprovalPanel
@@ -800,6 +1126,12 @@ function App() {
               approvalStatus={
                 approvalStatus
               }
+              executionStatus={
+                dashboard.executionStatus
+              }
+              verificationStatus={
+                dashboard.verificationStatus
+              }
               onApprove={
                 handleApprove
               }
@@ -807,10 +1139,11 @@ function App() {
                 handleReject
               }
               disabled={
-                !uiReady ||
+                !waitingForApproval ||
                 busy
               }
             />
+
 
             <VerificationPanel
               executionStatus={
@@ -829,6 +1162,7 @@ function App() {
           </div>
         )}
 
+
         <Timeline
           items={
             dashboard.timeline
@@ -837,6 +1171,7 @@ function App() {
             dashboard.simulationTimeMin
           }
         />
+
 
         <footer className="app-footer">
           <div>
@@ -848,6 +1183,7 @@ function App() {
               Human-supervised agentic airspace resilience
             </span>
           </div>
+
 
           <div>
             <span>

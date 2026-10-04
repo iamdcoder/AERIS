@@ -475,14 +475,14 @@ def test_invalid_candidate_cannot_be_applied():
     engine = RealEngineClient()
     engine.reset_engine()
 
+    engine.advance_simulation(
+        19
+    )
+
     candidates = (
         engine.get_alternatives(
             "F102"
         )
-    )
-
-    engine.advance_simulation(
-        19
     )
 
     invalid = next(

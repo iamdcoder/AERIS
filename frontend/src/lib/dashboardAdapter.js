@@ -5,13 +5,10 @@ function asNumber(
   value,
   fallback = null,
 ) {
-  const parsed = Number(
-    value,
-  );
+  const parsed =
+    Number(value);
 
-  return Number.isFinite(
-    parsed,
-  )
+  return Number.isFinite(parsed)
     ? parsed
     : fallback;
 }
@@ -24,7 +21,7 @@ function asPercentRatio(
     asNumber(value);
 
   if (number === null) {
-    return 0;
+    return null;
   }
 
   if (number > 2) {
@@ -32,6 +29,48 @@ function asPercentRatio(
   }
 
   return number;
+}
+
+
+function asArray(
+  value,
+) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    return Object.values(value);
+  }
+
+  return [];
+}
+
+
+function unwrapObject(
+  value,
+  keys = [],
+) {
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+    return null;
+  }
+
+  for (const key of keys) {
+    if (
+      value[key] &&
+      typeof value[key] === "object"
+    ) {
+      return value[key];
+    }
+  }
+
+  return value;
 }
 
 
@@ -57,10 +96,20 @@ function findTargetFlight(
     return worldState.target;
   }
 
+  const aircraft =
+    asArray(
+      worldState?.aircraft,
+    );
+
   return (
-    worldState?.aircraft?.find(
+    aircraft.find(
       (flight) =>
-        flight.id === flightId,
+        String(
+          flight?.id || "",
+        ) ===
+        String(
+          flightId || "F102",
+        ),
     ) || null
   );
 }
@@ -68,77 +117,176 @@ function findTargetFlight(
 
 function normalizeFlight(
   flight,
+  fallbackId = "F102",
 ) {
-  if (!flight) {
+  const value =
+    unwrapObject(
+      flight,
+      [
+        "flight",
+        "aircraft",
+      ],
+    );
+
+  if (!value) {
     return {
-      id: "F102",
-      callsign: "AER102",
+      id: fallbackId,
+      callsign: fallbackId,
       origin: "DEL",
       destination: "BOM",
       status: "UNKNOWN",
       fuelRemainingMin: 0,
-      reserveRequiredMin: 0,
+      reserveRequiredMin: 12,
       currentDelayMin: 0,
       performanceClass: "UNKNOWN",
+      position: null,
+      altitudeFt: null,
+      speedKt: null,
+      route: [],
     };
   }
 
+  const route =
+    asArray(
+      value.route,
+    );
+
   return {
     id:
-      flight.id || "F102",
+      value.id ||
+      fallbackId,
 
     callsign:
-      flight.callsign ||
-      flight.id ||
-      "UNKNOWN",
+      value.callsign ||
+      value.id ||
+      fallbackId,
 
     origin:
-      flight.origin ||
-      flight.route?.[0] ||
-      "N/A",
+      value.origin ||
+      route[0] ||
+      "DEL",
 
     destination:
-      flight.destination ||
-      flight.route?.[
-        flight.route.length - 1
+      value.destination ||
+      route[
+        route.length - 1
       ] ||
-      "N/A",
+      "BOM",
 
     status:
-      flight.status ||
+      value.status ||
       "UNKNOWN",
 
     fuelRemainingMin:
       asNumber(
-        flight.fuel_remaining_min,
+        value.fuel_remaining_min,
         0,
       ),
 
     reserveRequiredMin:
       asNumber(
-        flight.reserve_required_min,
-        0,
+        value.reserve_required_min ??
+          value.required_reserve_min,
+        12,
       ),
 
     currentDelayMin:
       asNumber(
-        flight.delay_min,
-        flight.current_delay_min ||
-          0,
+        value.delay_min ??
+          value.current_delay_min,
+        0,
       ),
 
     performanceClass:
-      flight.performance_class ||
+      value.performance_class ||
       "UNKNOWN",
+
+    position:
+      value.position ||
+      null,
+
+    altitudeFt:
+      asNumber(
+        value.altitude_ft,
+      ),
+
+    speedKt:
+      asNumber(
+        value.speed_kt,
+      ),
+
+    route,
   };
+}
+
+
+function deriveLocalScore(
+  candidate,
+) {
+  const targetDelay =
+    asNumber(
+      candidate?.target_delay_min,
+    );
+
+  const distance =
+    asNumber(
+      candidate?.added_distance_km,
+    );
+
+  if (
+    targetDelay === null &&
+    distance === null
+  ) {
+    return null;
+  }
+
+  const targetBenefit =
+    targetDelay === null
+      ? 0.5
+      : Math.max(
+          0,
+          Math.min(
+            1,
+            1 -
+              targetDelay /
+                20,
+          ),
+        );
+
+  const distanceEfficiency =
+    distance === null
+      ? 0.5
+      : Math.max(
+          0,
+          Math.min(
+            1,
+            1 -
+              distance /
+                250,
+          ),
+        );
+
+  return Number(
+    (
+      targetBenefit *
+        0.70 +
+      distanceEfficiency *
+        0.30
+    ).toFixed(
+      2,
+    ),
+  );
 }
 
 
 function normalizeCandidate(
   candidate,
 ) {
+  const value =
+    candidate || {};
+
   const stress =
-    candidate.stress_survival;
+    value.stress_survival;
 
   let stressPassed = 0;
   let stressTotal = 0;
@@ -159,8 +307,7 @@ function normalizeCandidate(
         0,
       );
   } else if (
-    typeof stress ===
-    "string"
+    typeof stress === "string"
   ) {
     const match =
       stress.match(
@@ -169,36 +316,42 @@ function normalizeCandidate(
 
     if (match) {
       stressPassed =
-        Number(match[1]);
+        Number(
+          match[1],
+        );
 
       stressTotal =
-        Number(match[2]);
+        Number(
+          match[2],
+        );
     }
   }
 
   const resilience =
     asNumber(
-      candidate.resilience_score,
+      value.resilience_score,
       asNumber(
-        candidate.resilience_metrics
+        value.resilience_metrics
           ?.future_robustness,
         0,
       ),
-    );
+    ) ?? 0;
 
   const peak =
     asPercentRatio(
-      candidate.max_sector_utilization_pct ??
-        candidate.peak_sector_utilization,
+      value.max_sector_utilization_pct ??
+        value.peak_sector_utilization,
     );
 
   const strategy =
-    candidate.strategy ||
-    candidate.intervention_type ||
+    value.strategy ||
+    value.intervention_type ||
     "INTERVENTION";
 
   const readableStrategy =
-    String(strategy)
+    String(
+      strategy,
+    )
       .replaceAll(
         "_",
         " ",
@@ -210,12 +363,15 @@ function normalizeCandidate(
       .toUpperCase();
 
   const rejectionReasons =
-    candidate.rejection_reasons ||
-    [];
+    Array.isArray(
+      value.rejection_reasons,
+    )
+      ? value.rejection_reasons
+      : [];
 
   const explanation =
-    candidate.score_explanation ||
-    candidate.explanation ||
+    value.score_explanation ||
+    value.explanation ||
     (
       rejectionReasons.length
         ? rejectionReasons.join(
@@ -226,34 +382,40 @@ function normalizeCandidate(
 
   return {
     id:
-      candidate.candidate_id ||
-      candidate.id ||
+      value.candidate_id ||
+      value.id ||
       "UNKNOWN",
 
     interventionType:
       readableStrategy,
 
     feasible:
-      candidate.feasible === true,
+      value.feasible === true,
+
+    operatorRejected:
+      false,
 
     localScore:
-      candidate.local_score ??
-      null,
+      asNumber(
+        value.local_score,
+        deriveLocalScore(
+          value,
+        ),
+      ),
 
     decisionScore:
-      candidate.decision_score ??
-      null,
+      asNumber(
+        value.decision_score,
+      ),
 
     targetDelayMin:
       asNumber(
-        candidate.target_delay_min,
-        0,
+        value.target_delay_min,
       ),
 
     networkDelayDeltaMin:
       asNumber(
-        candidate.network_delay_delta_min,
-        0,
+        value.network_delay_delta_min,
       ),
 
     peakSectorUtilization:
@@ -268,26 +430,26 @@ function normalizeCandidate(
 
     affectedFlights:
       asNumber(
-        candidate.affected_flights,
-        0,
+        value.affected_flights,
       ),
 
     fuelMarginKg:
-      candidate.fuel_margin_kg ??
-      null,
+      asNumber(
+        value.fuel_margin_kg,
+      ),
 
     fuelMarginMin:
-      candidate.fuel_reserve_margin_min ??
-      null,
+      asNumber(
+        value.fuel_reserve_margin_min,
+      ),
 
     extraDistanceKm:
       asNumber(
-        candidate.added_distance_km,
-        0,
+        value.added_distance_km,
       ),
 
     label:
-      candidate.label ||
+      value.label ||
       readableStrategy,
 
     summary:
@@ -298,11 +460,36 @@ function normalizeCandidate(
         ? rejectionReasons.join(
             "; ",
           )
-        : candidate.route_validation_error ||
+        : value.route_validation_error ||
           null,
 
-    raw: candidate,
+    raw: value,
   };
+}
+
+
+function pushAlert(
+  alerts,
+  alert,
+) {
+  if (!alert?.type) {
+    return;
+  }
+
+  const duplicate =
+    alerts.some(
+      (existing) =>
+        existing.type ===
+          alert.type &&
+        existing.summary ===
+          alert.summary,
+    );
+
+  if (!duplicate) {
+    alerts.push(
+      alert,
+    );
+  }
 }
 
 
@@ -310,79 +497,162 @@ function deriveDisruptions(
   worldState,
   response,
 ) {
-  const existing =
-    worldState?.alerts ||
-    (
-      worldState?.disruptions?.disruptions
-    ) ||
-    response?.weather_cells ||
-    [];
-
   const alerts = [];
 
-  if (
-    Array.isArray(
-      existing,
+  for (
+    const item of asArray(
+      worldState?.alerts,
     )
   ) {
-    existing.forEach(
-      (item) => {
-        if (
-          item &&
-          item.type
-        ) {
-          alerts.push(
-            {
-              type: item.type,
-              severity:
-                item.severity ||
-                "HIGH",
-              summary:
-                item.summary ||
-                "Active disruption detected.",
-            },
-          );
-        }
+    pushAlert(
+      alerts,
+      {
+        type: item.type,
+        severity:
+          item.severity ||
+          "HIGH",
+        summary:
+          item.summary ||
+          "Active disruption detected.",
       },
     );
   }
 
-  if (!alerts.length) {
-    for (
-      const cell
-      of worldState?.weather_cells ||
-      []
-    ) {
-      const intensity =
-        String(
-          cell.intensity ||
-            "NORMAL",
-        ).toUpperCase();
+  const disruptionResponse =
+    response ||
+    worldState?.disruptions ||
+    {};
 
-      if (
-        ![
+  for (
+    const cell of asArray(
+      disruptionResponse.weather_cells ??
+        worldState?.weather_cells,
+    )
+  ) {
+    const intensity =
+      String(
+        cell?.intensity ||
+          cell?.severity ||
           "NORMAL",
-          "LOW",
-          "NONE",
-        ].includes(
-          intensity,
-        )
-      ) {
-        alerts.push(
-          {
-            type:
-              "WEATHER_EXPANSION",
-            severity:
-              intensity,
-            summary:
-              `Weather cell ${cell.id || "UNKNOWN"} is ${intensity.toLowerCase()} in the current simulation.`,
-          },
-        );
-      }
+      ).toUpperCase();
+
+    if (
+      ![
+        "NORMAL",
+        "LOW",
+        "NONE",
+      ].includes(
+        intensity,
+      )
+    ) {
+      pushAlert(
+        alerts,
+        {
+          type:
+            "WEATHER_EXPANSION",
+
+          severity:
+            intensity ===
+            "MODERATE"
+              ? "HIGH"
+              : intensity,
+
+          summary:
+            `Weather cell ${
+              cell?.id ||
+              "UNKNOWN"
+            } is ${
+              intensity.toLowerCase()
+            } and constrains the operational corridor.`,
+        },
+      );
+    }
+  }
+
+  for (
+    const restriction of asArray(
+      disruptionResponse.restrictions ??
+        worldState?.restrictions,
+    )
+  ) {
+    if (
+      restriction?.active ===
+      true
+    ) {
+      pushAlert(
+        alerts,
+        {
+          type:
+            "AIRSPACE_RESTRICTION",
+
+          severity:
+            "HIGH",
+
+          summary:
+            `${
+              restriction.id ||
+              "Active restriction"
+            } is constraining routing.`,
+        },
+      );
     }
   }
 
   return alerts;
+}
+
+
+function sectorUtilization(
+  sector,
+) {
+  const direct =
+    asPercentRatio(
+      sector?.utilization_pct ??
+        sector?.projected_utilization,
+    );
+
+  const forecast =
+    asNumber(
+      sector?.forecast_traffic,
+    );
+
+  const capacity =
+    asNumber(
+      sector?.capacity,
+    );
+
+  const forecastRatio =
+    forecast !== null &&
+    capacity !== null &&
+    capacity > 0
+      ? forecast /
+        capacity
+      : null;
+
+  if (
+    direct === null &&
+    forecastRatio === null
+  ) {
+    return null;
+  }
+
+  if (
+    direct === null
+  ) {
+    return forecastRatio;
+  }
+
+  if (
+    forecastRatio ===
+    null
+  ) {
+    return direct;
+  }
+
+  return Math.max(
+    direct,
+    forecastRatio,
+  );
 }
 
 
@@ -391,23 +661,27 @@ function normalizeNetwork(
   networkResponse,
 ) {
   const aircraft =
-    worldState?.aircraft ||
-    [];
+    asArray(
+      worldState?.aircraft,
+    );
 
   const sectors =
-    worldState?.sectors ||
-    [];
+    asArray(
+      worldState?.sectors,
+    );
 
-  const totalDelayFromState =
+  const totalDelay =
     aircraft.reduce(
       (
         total,
         flight,
       ) =>
         total +
-        asNumber(
-          flight.delay_min,
-          0,
+        (
+          asNumber(
+            flight?.delay_min,
+            0,
+          ) || 0
         ),
       0,
     );
@@ -415,11 +689,15 @@ function normalizeNetwork(
   const holding =
     aircraft.filter(
       (flight) =>
-        String(
-          flight.status ||
-            "",
-        ).toUpperCase()
-        === "HOLDING",
+        [
+          "HOLDING",
+          "HELD",
+        ].includes(
+          String(
+            flight?.status ||
+              "",
+          ).toUpperCase(),
+        ),
     ).length;
 
   const stressed =
@@ -427,14 +705,13 @@ function normalizeNetwork(
       (sector) => {
         const status =
           String(
-            sector.status ||
+            sector?.status ||
               "",
           ).toUpperCase();
 
         const utilization =
-          asPercentRatio(
-            sector.utilization_pct ??
-              sector.projected_utilization,
+          sectorUtilization(
+            sector,
           );
 
         return (
@@ -446,26 +723,38 @@ function normalizeNetwork(
           ].includes(
             status,
           ) ||
-          utilization >= 0.85
+          (
+            utilization !==
+              null &&
+            utilization >=
+              0.85
+          )
         );
       },
     ).length;
 
   return {
     activeAircraft:
-      networkResponse?.total_flights ??
-      aircraft.length,
+      asNumber(
+        networkResponse?.total_flights ??
+          networkResponse?.airborne_flights,
+        aircraft.length,
+      ),
 
     aircraftInHolding:
-      networkResponse?.holding_flights ??
-      holding,
+      asNumber(
+        networkResponse?.holding_flights,
+        holding,
+      ),
 
     stressedSectors:
       stressed,
 
     networkDelayMin:
-      networkResponse?.total_delay_min ??
-      totalDelayFromState,
+      asNumber(
+        networkResponse?.total_delay_min,
+        totalDelay,
+      ),
   };
 }
 
@@ -479,13 +768,20 @@ function normalizeAirport(
     "BOM";
 
   const airports =
-    worldState?.airports ||
-    [];
+    asArray(
+      worldState?.airports,
+    );
 
   const airport =
     airports.find(
       (item) =>
-        item.id === destination,
+        item?.id ===
+        destination,
+    ) ||
+    airports.find(
+      (item) =>
+        item?.id ===
+        "BOM",
     ) ||
     airports[0];
 
@@ -503,97 +799,231 @@ function normalizeAirport(
 
   return {
     id:
-      airport.id,
+      airport.id ||
+      destination,
 
     operationalStatus:
       airport.operational_status ||
       "NORMAL",
 
     arrivalCapacityPer15Min:
-      airport.arrival_capacity ??
-      null,
+      asNumber(
+        airport.arrival_capacity,
+      ),
 
     normalArrivalCapacityPer15Min:
-      airport.normal_arrival_capacity ??
-      null,
+      asNumber(
+        airport.normal_arrival_capacity,
+      ),
   };
 }
 
 
 function normalizeVerification(
   agentState,
+  recommendedCandidate,
 ) {
   const value =
     agentState?.verification_result;
 
   if (!value) {
     return {
-      targetDelayDeltaMin: 0,
-      networkDelayDeltaMin: 0,
-      peakSectorUtilization: 0,
-      newConflicts: 0,
-      fuelMarginKg: 0,
-      downstreamRisk: "UNKNOWN",
+      status: "PENDING",
+      targetDelayDeltaMin:
+        null,
+      networkDelayDeltaMin:
+        null,
+      peakSectorUtilization:
+        null,
+      newConflicts:
+        null,
+      fuelMarginKg:
+        null,
+      fuelMarginMin:
+        recommendedCandidate?.fuelMarginMin ??
+        null,
+      remainingFuelMin:
+        null,
+      downstreamRisk:
+        "UNKNOWN",
+      constraintsSafe:
+        null,
+      routeValid:
+        null,
+      conflictSafe:
+        null,
+      restrictionSafe:
+        null,
+      checksAvailable:
+        false,
+      verifiedAtMin:
+        null,
+      summary:
+        "Post-action verification has not run yet.",
     };
   }
 
+  const after =
+    value.after_metrics ||
+    {};
+
+  const targetDelay =
+    asNumber(
+      after.target_delay_delta_min ??
+        value.target_delay_delta_min,
+    );
+
+  const networkDelay =
+    asNumber(
+      after.network_delay_delta_min ??
+        value.network_delay_delta_min,
+    );
+
+  const conflicts =
+    asNumber(
+      after.new_conflicts ??
+        value.new_conflicts,
+    );
+
+  const fuelMarginKg =
+    asNumber(
+      after.fuel_margin_kg ??
+        value.fuel_margin_kg,
+    );
+
+  const fuelMarginMin =
+    asNumber(
+      after.fuel_reserve_margin_min ??
+        value.fuel_reserve_margin_min,
+    ) ??
+    recommendedCandidate?.fuelMarginMin ??
+    null;
+
+  const remainingFuel =
+    asNumber(
+      after.remaining_fuel_min ??
+        value.remaining_fuel_min,
+    );
+
+  const peak =
+    asPercentRatio(
+      after.max_sector_utilization_pct ??
+        after.peak_sector_utilization ??
+        value.max_sector_utilization_pct ??
+        value.peak_sector_utilization,
+    );
+
+  const constraintsSafe =
+    typeof value.constraints_safe ===
+    "boolean"
+      ? value.constraints_safe
+      : typeof after.constraints_safe ===
+          "boolean"
+        ? after.constraints_safe
+        : null;
+
+  const routeValid =
+    typeof value.route_valid ===
+    "boolean"
+      ? value.route_valid
+      : null;
+
+  const conflictSafe =
+    typeof value.conflict_safe ===
+    "boolean"
+      ? value.conflict_safe
+      : null;
+
+  const restrictionSafe =
+    typeof value.restriction_safe ===
+    "boolean"
+      ? value.restriction_safe
+      : null;
+
+  const downstreamRisk =
+    value.downstream_risk ||
+    after.downstream_risk ||
+    "UNKNOWN";
+
+  const verifiedAtMin =
+    asNumber(
+      after.verified_at_min ??
+        value.verified_at_min,
+    );
+
   return {
+    status:
+      String(
+        value.status ||
+          "PENDING",
+      ).toUpperCase(),
+
     targetDelayDeltaMin:
-      asNumber(
-        value.after_metrics
-          ?.target_delay_delta_min ??
-          value.target_delay_delta_min,
-        0,
-      ),
+      targetDelay,
 
     networkDelayDeltaMin:
-      asNumber(
-        value.after_metrics
-          ?.network_delay_delta_min ??
-          value.network_delay_delta_min,
-        0,
-      ),
+      networkDelay,
 
     peakSectorUtilization:
-      asPercentRatio(
-        value.after_metrics
-          ?.max_sector_utilization_pct ??
-          value.after_metrics
-            ?.peak_sector_utilization ??
-          value.peak_sector_utilization,
-      ),
+      peak,
 
     newConflicts:
-      asNumber(
-        value.after_metrics
-          ?.new_conflicts ??
-          value.new_conflicts,
-        0,
-      ),
+      conflicts,
 
-    fuelMarginKg:
-      asNumber(
-        value.after_metrics
-          ?.fuel_margin_kg ??
-          value.fuel_margin_kg,
-        0,
-      ),
+    fuelMarginKg,
+
+    fuelMarginMin,
+
+    remainingFuelMin,
 
     downstreamRisk:
-      value.after_metrics
-        ?.downstream_risk ||
-      value.downstream_risk ||
-      "UNKNOWN",
+      String(
+        downstreamRisk,
+      ).toUpperCase(),
+
+    constraintsSafe,
+
+    routeValid,
+
+    conflictSafe,
+
+    restrictionSafe,
+
+    checksAvailable:
+      true,
+
+    verifiedAtMin,
+
+    summary:
+      value.summary ||
+      "Deterministic post-action verification completed.",
   };
 }
 
 
 function extractExecutionState(
   agentState,
+  isReassessment,
 ) {
+  if (
+    isReassessment
+  ) {
+    return {
+      executionStatus:
+        "LOCKED",
+
+      executionMode:
+        "AWAITING_APPROVAL",
+
+      verificationStatus:
+        "PENDING",
+    };
+  }
+
   const events =
-    agentState?.events ||
-    [];
+    asArray(
+      agentState?.events,
+    );
 
   let executionStatus =
     "LOCKED";
@@ -602,36 +1032,49 @@ function extractExecutionState(
     "SIMULATION_FALLBACK";
 
   let verificationStatus =
-    agentState
-      ?.verification_result
-      ?.status ||
-    "PENDING";
+    String(
+      agentState
+        ?.verification_result
+        ?.status ||
+        "PENDING",
+    ).toUpperCase();
 
   for (
-    const event
-    of [...events].reverse()
+    const event of [
+      ...events,
+    ].reverse()
   ) {
     if (
-      event.event_type ===
+      event?.event_type ===
       "EXECUTION_RESULT"
     ) {
       executionStatus =
-        event.data?.status ||
+        event?.data?.status ||
         "EXECUTED";
 
       executionMode =
-        event.data?.mode ||
+        event?.data?.mode ||
         executionMode;
     }
 
     if (
-      event.event_type ===
+      event?.event_type ===
       "VERIFICATION_RESULT"
     ) {
       verificationStatus =
-        event.data?.status ||
+        event?.data?.status ||
         verificationStatus;
     }
+  }
+
+  if (
+    agentState?.status ===
+      "COMPLETED" &&
+    verificationStatus ===
+      "PENDING"
+  ) {
+    verificationStatus =
+      "VERIFIED";
   }
 
   return {
@@ -653,6 +1096,93 @@ function extractExecutionState(
 }
 
 
+function extractReassessmentInfo(
+  agentState,
+) {
+  const events =
+    asArray(
+      agentState?.events,
+    );
+
+  const event =
+    [...events]
+      .reverse()
+      .find(
+        (item) =>
+          item?.event_type ===
+          "REASSESSMENT_COMPLETE",
+      );
+
+  if (!event) {
+    return null;
+  }
+
+  const data =
+    event.data || {};
+
+  const rejectedCandidateId =
+    data.rejected_candidate_id ||
+    null;
+
+  const rejectionReason =
+    data.rejection_reason ||
+    null;
+
+  const excludedCandidateIds =
+    Array.isArray(
+      data.excluded_candidate_ids,
+    )
+      ? data.excluded_candidate_ids
+      : rejectedCandidateId
+        ? [rejectedCandidateId]
+        : [];
+
+  const newRecommendedCandidateId =
+    data.new_recommended_candidate_id ||
+    event.candidate_id ||
+    null;
+
+  return {
+    rejectedCandidateId,
+
+    rejectionReason,
+
+    excludedCandidateIds,
+
+    newRecommendedCandidateId,
+
+    summary:
+      data.summary ||
+      event.message ||
+      "AERIS completed a reassessment.",
+  };
+}
+
+
+function stageRank(
+  stage,
+) {
+  const stages = [
+    "OBSERVE",
+    "DIAGNOSE",
+    "PLAN",
+    "EVALUATE",
+    "STRESS_TEST",
+    "CRITIC",
+    "RECOMMEND",
+    "HUMAN_APPROVAL",
+    "EXECUTE",
+    "VERIFY",
+    "REASSESS",
+    "COMPLETE",
+  ];
+
+  return stages.indexOf(
+    stage,
+  );
+}
+
+
 function currentDisplayStage(
   agentState,
 ) {
@@ -663,13 +1193,15 @@ function currentDisplayStage(
     ).toUpperCase();
 
   if (
-    stage === "COMPLETE"
+    stage ===
+    "COMPLETE"
   ) {
     return "VERIFY";
   }
 
   if (
-    stage === "REASSESS"
+    stage ===
+    "REASSESS"
   ) {
     return "HUMAN_APPROVAL";
   }
@@ -678,19 +1210,202 @@ function currentDisplayStage(
 }
 
 
+function timelineItem(
+  time,
+  title,
+  description,
+) {
+  return {
+    time,
+    title,
+    description,
+  };
+}
+
+
+function buildTimeline(
+  agentState,
+  simulationTimeMin,
+  reassessmentInfo,
+) {
+  const base =
+    DEMO_TIMELINE.map(
+      (item) => ({
+        ...item,
+      }),
+    );
+
+  const stage =
+    String(
+      agentState?.stage ||
+        "",
+    ).toUpperCase();
+
+  const stageIndex =
+    stageRank(
+      stage,
+    );
+
+  if (
+    stageIndex >=
+    6
+  ) {
+    base.push(
+      timelineItem(
+        "T+19",
+        "AERIS recommends",
+        "Candidate evidence converges on the resilient network-level intervention.",
+      ),
+    );
+  }
+
+
+  if (
+    reassessmentInfo
+  ) {
+    const rejectedId =
+      reassessmentInfo.rejectedCandidateId ||
+      "previous candidate";
+
+    const reason =
+      reassessmentInfo.rejectionReason ||
+      "Operator rejected the previous recommendation.";
+
+    base.push(
+      timelineItem(
+        "T+19",
+        "Human rejects",
+        `${rejectedId} rejected: ${reason}`,
+      ),
+    );
+
+    base.push(
+      timelineItem(
+        "T+19",
+        "AERIS reassesses",
+        "AERIS excludes the rejected intervention and re-ranks the remaining candidates.",
+      ),
+    );
+
+    if (
+      reassessmentInfo
+        .newRecommendedCandidateId
+    ) {
+      base.push(
+        timelineItem(
+          "T+19",
+          "New recommendation",
+          `AERIS now recommends ${reassessmentInfo.newRecommendedCandidateId} and requires fresh human approval.`,
+        ),
+      );
+    }
+  } else if (
+    agentState?.approval
+      ?.decision ===
+    "APPROVED"
+  ) {
+    base.push(
+      timelineItem(
+        "T+19",
+        "Human approves",
+        "The operator authorizes the selected intervention before execution.",
+      ),
+    );
+  }
+
+
+  const verification =
+    normalizeVerification(
+      agentState,
+      null,
+    );
+
+
+  if (
+    !reassessmentInfo &&
+    verification.status ===
+      "VERIFIED"
+  ) {
+    const verifiedAt =
+      verification.verifiedAtMin ??
+      simulationTimeMin;
+
+    base.push(
+      timelineItem(
+        `T+${String(
+          verifiedAt,
+        ).padStart(
+          2,
+          "0",
+        )}`,
+        "Network verified",
+        "Post-action constraints and network impact remain within the deterministic verification boundary.",
+      ),
+    );
+  }
+
+
+  const seen =
+    new Set();
+
+  return base.filter(
+    (item) => {
+      const key =
+        `${item.time}|${item.title}|${item.description}`;
+
+      if (
+        seen.has(
+          key,
+        )
+      ) {
+        return false;
+      }
+
+      seen.add(
+        key,
+      );
+
+      return true;
+    },
+  );
+}
+
+
 function baseDashboard({
   worldState,
   disruptionResponse,
   networkResponse,
   flight,
+  simulationTimeOverride,
 }) {
+  const flightCandidate =
+    unwrapObject(
+      flight,
+      [
+        "flight",
+        "aircraft",
+      ],
+    );
+
+  const targetId =
+    flightCandidate?.id ||
+    "F102";
+
   const targetFlight =
     normalizeFlight(
-      flight ||
+      flightCandidate ||
         findTargetFlight(
           worldState,
-          "F102",
+          targetId,
         ),
+      targetId,
+    );
+
+  const simulationTimeMin =
+    asNumber(
+      simulationTimeOverride ??
+        worldState?.time_min,
+      0,
     );
 
   return {
@@ -703,16 +1418,15 @@ function baseDashboard({
 
     scenarioId:
       worldState?.scenario_id ||
-      "mumbai_weather_crisis",
+      "mumbai_weather_crisis_v2",
 
-    simulationTimeMin:
-      worldState?.time_min ??
-      0,
+    simulationTimeMin,
 
     targetFlight,
 
     disruption: {
-      severity: "HIGH",
+      severity:
+        "HIGH",
 
       title:
         "Active airspace disruption",
@@ -734,12 +1448,14 @@ function baseDashboard({
       ),
 
     sectors:
-      worldState?.sectors ||
-      [],
+      asArray(
+        worldState?.sectors,
+      ),
 
     weather:
-      worldState?.weather_cells ||
-      [],
+      asArray(
+        worldState?.weather_cells,
+      ),
 
     network:
       normalizeNetwork(
@@ -767,13 +1483,30 @@ function baseDashboard({
     verification:
       normalizeVerification(
         {},
+        null,
       ),
+
+    rejectedCandidateId:
+      null,
+
+    rejectionReason:
+      null,
+
+    excludedCandidateIds:
+      [],
+
+    isReassessment:
+      false,
 
     agentStage:
       "OBSERVE",
 
     timeline:
-      DEMO_TIMELINE,
+      buildTimeline(
+        null,
+        simulationTimeMin,
+        null,
+      ),
   };
 }
 
@@ -781,25 +1514,42 @@ function baseDashboard({
 export function normalizeBaseline(
   data,
 ) {
-  return baseDashboard(
-    {
-      worldState:
-        data?.airspace ||
-        {},
+  const airspace =
+    data?.airspace ||
+    {};
 
-      disruptionResponse:
-        data?.disruptions ||
-        {},
+  const flight =
+    unwrapObject(
+      data?.flight,
+      [
+        "flight",
+        "aircraft",
+      ],
+    ) ||
+    findTargetFlight(
+      airspace,
+      "F102",
+    );
 
-      networkResponse:
-        data?.network ||
-        {},
+  return baseDashboard({
+    worldState:
+      airspace,
 
-      flight:
-        data?.flight ||
-        null,
-    },
-  );
+    disruptionResponse:
+      data?.disruptions ||
+      {},
+
+    networkResponse:
+      data?.network ||
+      {},
+
+    flight,
+
+    simulationTimeOverride:
+      airspace?.time_min ??
+      data?.network?.time_min ??
+      0,
+  });
 }
 
 
@@ -810,56 +1560,162 @@ export function normalizeAgentState(
     agentState?.world_state ||
     {};
 
+  const targetId =
+    agentState?.target_flight_id ||
+    "F102";
+
+
   const targetFlight =
     normalizeFlight(
       findTargetFlight(
         worldState,
-        agentState?.target_flight_id ||
-          "F102",
+        targetId,
       ),
+      targetId,
     );
 
-  const candidates = (
-    agentState?.candidates ||
-    []
-  ).map(
-    normalizeCandidate,
-  );
+
+  const reassessmentInfo =
+    extractReassessmentInfo(
+      agentState,
+    );
+
+
+  const isReassessment =
+    Boolean(
+      reassessmentInfo,
+    ) &&
+    String(
+      agentState?.stage ||
+        "",
+    ).toUpperCase() ===
+      "HUMAN_APPROVAL";
+
+
+  const rawCandidates =
+    asArray(
+      agentState?.candidates,
+    );
+
+
+  const excludedSet =
+    new Set(
+      reassessmentInfo
+        ?.excludedCandidateIds ||
+        [],
+    );
+
+
+  const candidates =
+    rawCandidates
+      .map(
+        normalizeCandidate,
+      )
+      .map(
+        (candidate) => ({
+          ...candidate,
+
+          operatorRejected:
+            excludedSet.has(
+              candidate.id,
+            ),
+
+          rejectionReason:
+            excludedSet.has(
+              candidate.id,
+            )
+              ? reassessmentInfo
+                  ?.rejectionReason ||
+                candidate.rejectionReason
+              : candidate.rejectionReason,
+        }),
+      );
+
 
   const recommendation =
     agentState?.recommendation ||
     null;
+
 
   const recommendedId =
     recommendation?.candidate_id ||
     agentState?.leading_candidate_id ||
     null;
 
+
   const recommendedCandidate =
     candidates.find(
       (candidate) =>
         candidate.id ===
-        recommendedId,
+          recommendedId &&
+        !candidate.operatorRejected,
+    ) ||
+    candidates.find(
+      (candidate) =>
+        candidate.feasible &&
+        !candidate.operatorRejected,
     ) ||
     null;
+
+
+  const historicalApproval =
+    agentState?.approval ||
+    {};
+
+
+  const historicalDecision =
+    String(
+      historicalApproval
+        ?.decision ||
+        "PENDING",
+    ).toUpperCase();
+
+
+  const currentApprovalStatus =
+    isReassessment
+      ? "PENDING"
+      : historicalDecision;
+
 
   const execution =
     extractExecutionState(
       agentState,
+      isReassessment,
     );
 
+
+  const verification =
+    isReassessment
+      ? normalizeVerification(
+          {},
+          recommendedCandidate,
+        )
+      : normalizeVerification(
+          agentState,
+          recommendedCandidate,
+        );
+
+
   const dashboard =
-    baseDashboard(
-      {
-        worldState,
-        disruptionResponse:
-          worldState?.disruptions ||
-          {},
-        networkResponse:
-          {},
-        flight: targetFlight,
-      },
-    );
+    baseDashboard({
+      worldState,
+
+      disruptionResponse:
+        worldState?.disruptions ||
+        {},
+
+      networkResponse:
+        worldState?.network_metrics ||
+        {},
+
+      flight:
+        targetFlight,
+
+      simulationTimeOverride:
+        worldState?.time_min ??
+        19,
+    });
+
 
   dashboard.source =
     "AERIS_BACKEND_AGENT_STATE";
@@ -867,8 +1723,14 @@ export function normalizeAgentState(
   dashboard.mode =
     "AERIS BACKEND";
 
+  dashboard.scenarioId =
+    agentState?.scenario_id ||
+    dashboard.scenarioId;
+
+
   dashboard.candidates =
     candidates;
+
 
   dashboard.recommendation =
     recommendedCandidate
@@ -877,51 +1739,96 @@ export function normalizeAgentState(
             recommendedCandidate.id,
 
           decisionScore:
-            asNumber(
-              recommendedCandidate.decisionScore,
-              0,
-            ),
+            recommendedCandidate.decisionScore,
 
           confidence:
             asNumber(
-              recommendation?.confidence,
+              recommendation
+                ?.confidence,
               0,
             ),
 
           summary:
             recommendation?.summary ||
+            reassessmentInfo?.summary ||
             recommendedCandidate.summary,
         }
       : null;
 
+
   dashboard.approvalStatus =
-    String(
-      agentState?.approval
-        ?.decision ||
-        "PENDING",
-    ).toUpperCase();
+    currentApprovalStatus;
+
 
   dashboard.executionStatus =
     execution.executionStatus;
 
+
   dashboard.verificationStatus =
     execution.verificationStatus;
+
 
   dashboard.executionMode =
     execution.executionMode;
 
+
   dashboard.verification =
-    normalizeVerification(
-      agentState,
-    );
+    verification;
+
 
   dashboard.agentStage =
     currentDisplayStage(
       agentState,
     );
 
+
+  dashboard.rejectedCandidateId =
+    reassessmentInfo
+      ?.rejectedCandidateId ||
+    null;
+
+
+  dashboard.rejectionReason =
+    reassessmentInfo
+      ?.rejectionReason ||
+    null;
+
+
+  dashboard.excludedCandidateIds =
+    reassessmentInfo
+      ?.excludedCandidateIds ||
+    [];
+
+
+  dashboard.isReassessment =
+    isReassessment;
+
+
+  if (
+    !isReassessment &&
+    verification.status ===
+      "VERIFIED" &&
+    verification.verifiedAtMin !==
+      null
+  ) {
+    dashboard.simulationTimeMin =
+      verification.verifiedAtMin;
+  }
+
+
+  dashboard.timeline =
+    buildTimeline(
+      agentState,
+      dashboard.simulationTimeMin,
+      isReassessment
+        ? reassessmentInfo
+        : null,
+    );
+
+
   dashboard.rawAgentState =
     agentState;
+
 
   return dashboard;
 }
@@ -934,10 +1841,19 @@ export function getRecommendedCandidate(
     dashboard?.recommendation
       ?.candidateId;
 
+
   return (
     dashboard?.candidates?.find(
       (candidate) =>
-        candidate.id === id,
-    ) || null
+        candidate.id ===
+          id &&
+        !candidate.operatorRejected,
+    ) ||
+    dashboard?.candidates?.find(
+      (candidate) =>
+        candidate.feasible &&
+        !candidate.operatorRejected,
+    ) ||
+    null
   );
 }

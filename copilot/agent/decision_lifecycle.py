@@ -69,35 +69,29 @@ class DecisionLifecycleController:
         verifier: Optional[InterventionVerifier] = None,
         reassessor: Optional[CandidateReassessor] = None,
         engine: Optional[Any] = None,
+        verification_advance_minutes: int = 2,
     ) -> None:
+        self.engine = engine
+
         self.executor = (
             executor
             or InterventionExecutor(
                 engine=engine
             )
         )
-    
+
+        self.verification_advance_minutes = max(
+            0,
+            int(
+                verification_advance_minutes
+            ),
+        )
+
         self.verifier = (
             verifier
             or InterventionVerifier(
                 engine=engine
             )
-        )
-    
-        self.reassessor = (
-            reassessor
-            or CandidateReassessor(
-                ranker=DecisionRanker()
-            )
-        )
-        self.executor = (
-            executor
-            or InterventionExecutor()
-        )
-
-        self.verifier = (
-            verifier
-            or InterventionVerifier()
         )
 
         self.reassessor = (
@@ -115,7 +109,9 @@ class DecisionLifecycleController:
         registry: Optional[Any] = None,
         simulation: Optional[Mapping[str, Any]] = None,
     ) -> DecisionLifecycleResult:
-        candidate_id = self._candidate_id(candidate)
+        candidate_id = self._candidate_id(
+            candidate
+        )
 
         if (
             approval_record.decision
@@ -162,7 +158,10 @@ class DecisionLifecycleController:
             simulation=simulation,
         )
 
-        if execution.status.value != "EXECUTED":
+        if (
+            execution.status.value
+            != "EXECUTED"
+        ):
             return DecisionLifecycleResult(
                 candidate_id=candidate_id,
                 target_flight_id=target_flight_id,
@@ -175,6 +174,21 @@ class DecisionLifecycleController:
                     "execution failed."
                 ),
             )
+
+        if (
+            self.engine is not None
+            and self.verification_advance_minutes > 0
+        ):
+            advance = getattr(
+                self.engine,
+                "advance_simulation",
+                None,
+            )
+
+            if callable(advance):
+                advance(
+                    self.verification_advance_minutes
+                )
 
         verification = self.verifier.verify(
             execution=execution,
@@ -211,7 +225,9 @@ class DecisionLifecycleController:
         candidates: Iterable[Mapping[str, Any]],
         simulations: Optional[Any] = None,
         stress_tests: Optional[Any] = None,
-        previously_rejected_ids: Optional[Iterable[str]] = None,
+        previously_rejected_ids: Optional[
+            Iterable[str]
+        ] = None,
     ) -> DecisionLifecycleResult:
         if (
             approval_record.decision
@@ -221,21 +237,30 @@ class DecisionLifecycleController:
                 "process_rejection requires a REJECTED approval record."
             )
 
-        reason = approval_record.reason or ""
+        reason = (
+            approval_record.reason
+            or ""
+        )
 
-        reassessment = self.reassessor.reassess(
-            rejected_candidate_id=(
-                approval_record.candidate_id
-            ),
-            rejection_reason=reason,
-            candidates=candidates,
-            simulations=simulations,
-            stress_tests=stress_tests,
-            previously_rejected_ids=previously_rejected_ids,
+        reassessment = (
+            self.reassessor.reassess(
+                rejected_candidate_id=(
+                    approval_record.candidate_id
+                ),
+                rejection_reason=reason,
+                candidates=candidates,
+                simulations=simulations,
+                stress_tests=stress_tests,
+                previously_rejected_ids=(
+                    previously_rejected_ids
+                ),
+            )
         )
 
         return DecisionLifecycleResult(
-            candidate_id=approval_record.candidate_id,
+            candidate_id=(
+                approval_record.candidate_id
+            ),
             target_flight_id=(
                 approval_record.target_flight_id
             ),
@@ -260,7 +285,9 @@ class DecisionLifecycleController:
         candidates: Iterable[Mapping[str, Any]],
         simulations: Optional[Any] = None,
         stress_tests: Optional[Any] = None,
-        previously_rejected_ids: Optional[Iterable[str]] = None,
+        previously_rejected_ids: Optional[
+            Iterable[str]
+        ] = None,
     ) -> ReassessmentResult:
         if (
             verification.status
@@ -277,12 +304,16 @@ class DecisionLifecycleController:
         )
 
         return self.reassessor.reassess(
-            rejected_candidate_id=verification.candidate_id,
+            rejected_candidate_id=(
+                verification.candidate_id
+            ),
             rejection_reason=reason,
             candidates=candidates,
             simulations=simulations,
             stress_tests=stress_tests,
-            previously_rejected_ids=previously_rejected_ids,
+            previously_rejected_ids=(
+                previously_rejected_ids
+            ),
         )
 
     @staticmethod
@@ -295,9 +326,13 @@ class DecisionLifecycleController:
             "route_id",
             "alternative_id",
         ):
-            value = candidate.get(key)
+            value = candidate.get(
+                key
+            )
 
             if value is not None:
-                return str(value)
+                return str(
+                    value
+                )
 
         return "UNKNOWN"

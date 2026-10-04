@@ -1,9 +1,20 @@
-const API_BASE_URL =
+const RAW_API_BASE_URL =
   import.meta.env.VITE_API_URL ||
   import.meta.env.VITE_API_BASE_URL ||
   "http://127.0.0.1:8000";
 
+const API_BASE_URL =
+  String(RAW_API_BASE_URL)
+    .replace(/\/+$/, "");
+
 const DEFAULT_TIMEOUT_MS = 15000;
+
+const FLAGSHIP_DEFAULTS = {
+  target_flight_id: "F102",
+  scenario_id: "mumbai_weather_crisis_v2",
+  decision_time_min: 19,
+};
+
 
 async function requestJson(
   path,
@@ -16,23 +27,36 @@ async function requestJson(
     options.timeoutMs ||
     DEFAULT_TIMEOUT_MS;
 
-  const timeout = window.setTimeout(
-    () => controller.abort(),
-    timeoutMs,
-  );
+  const timeout =
+    window.setTimeout(
+      () =>
+        controller.abort(),
+      timeoutMs,
+    );
 
   try {
-    const response = await fetch(
-      `${API_BASE_URL}${path}`,
-      {
-        ...options,
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          ...(options.headers || {}),
+    const {
+      timeoutMs: _ignoredTimeout,
+      ...fetchOptions
+    } = options;
+
+    const response =
+      await fetch(
+        `${API_BASE_URL}${path}`,
+        {
+          ...fetchOptions,
+
+          signal:
+            controller.signal,
+
+          headers: {
+            "Content-Type":
+              "application/json",
+            ...(fetchOptions.headers ||
+              {}),
+          },
         },
-      },
-    );
+      );
 
     const contentType =
       response.headers.get(
@@ -49,10 +73,12 @@ async function requestJson(
     if (!response.ok) {
       return {
         ok: false,
-        status: response.status,
+        status:
+          response.status,
         data: null,
         error:
-          typeof data === "object"
+          typeof data ===
+          "object"
             ? data?.detail ||
               "Backend request failed."
             : String(data),
@@ -61,7 +87,8 @@ async function requestJson(
 
     return {
       ok: true,
-      status: response.status,
+      status:
+        response.status,
       data,
       error: null,
     };
@@ -71,7 +98,8 @@ async function requestJson(
       status: null,
       data: null,
       error:
-        error?.name === "AbortError"
+        error?.name ===
+        "AbortError"
           ? "Backend request timed out."
           : error?.message ||
             "Unable to reach AERIS backend.",
@@ -131,11 +159,13 @@ export async function fetchBaseline(
     network,
   };
 
-  const failed = Object.entries(
-    responses,
-  ).filter(
-    ([, result]) => !result.ok,
-  );
+  const failed =
+    Object.entries(
+      responses,
+    ).filter(
+      ([, result]) =>
+        !result.ok,
+    );
 
   if (failed.length) {
     return {
@@ -153,12 +183,18 @@ export async function fetchBaseline(
 
   return {
     ok: true,
+
     data: {
-      airspace: airspace.data,
-      disruptions: disruptions.data,
-      flight: flight.data,
-      network: network.data,
+      airspace:
+        airspace.data,
+      disruptions:
+        disruptions.data,
+      flight:
+        flight.data,
+      network:
+        network.data,
     },
+
     error: null,
   };
 }
@@ -169,40 +205,61 @@ export async function resetCopilot() {
     "/copilot/reset",
     {
       method: "POST",
+
       timeoutMs: 5000,
-      body: JSON.stringify({}),
+
+      body:
+        JSON.stringify(
+          {},
+        ),
     },
   );
 }
 
 
 export async function runCopilotRecommendation(
-  payload,
+  payload = {},
 ) {
+  const requestPayload = {
+    ...FLAGSHIP_DEFAULTS,
+    ...payload,
+  };
+
   return requestJson(
     "/copilot/recommend",
     {
       method: "POST",
+
       timeoutMs: 30000,
-      body: JSON.stringify(
-        payload,
-      ),
+
+      body:
+        JSON.stringify(
+          requestPayload,
+        ),
     },
   );
 }
 
 
 export async function runCopilotInvestigation(
-  payload,
+  payload = {},
 ) {
+  const requestPayload = {
+    ...FLAGSHIP_DEFAULTS,
+    ...payload,
+  };
+
   return requestJson(
     "/copilot/investigate",
     {
       method: "POST",
+
       timeoutMs: 20000,
-      body: JSON.stringify(
-        payload,
-      ),
+
+      body:
+        JSON.stringify(
+          requestPayload,
+        ),
     },
   );
 }
@@ -215,10 +272,13 @@ export async function approveCopilotRun(
     "/copilot/approve",
     {
       method: "POST",
+
       timeoutMs: 15000,
-      body: JSON.stringify(
-        payload,
-      ),
+
+      body:
+        JSON.stringify(
+          payload,
+        ),
     },
   );
 }
@@ -231,20 +291,17 @@ export async function rejectCopilotRun(
     "/copilot/reject",
     {
       method: "POST",
+
       timeoutMs: 15000,
-      body: JSON.stringify(
-        payload,
-      ),
+
+      body:
+        JSON.stringify(
+          payload,
+        ),
     },
   );
 }
 
-
-/*
- * Low-level engine endpoints remain available.
- * They are useful for direct API testing and future
- * engine-specific UI workflows.
- */
 
 export async function applyIntervention(
   payload,
@@ -253,10 +310,13 @@ export async function applyIntervention(
     "/apply",
     {
       method: "POST",
+
       timeoutMs: 10000,
-      body: JSON.stringify(
-        payload,
-      ),
+
+      body:
+        JSON.stringify(
+          payload,
+        ),
     },
   );
 }
@@ -269,10 +329,23 @@ export async function verifyIntervention(
     "/verify",
     {
       method: "POST",
+
       timeoutMs: 10000,
-      body: JSON.stringify(
-        payload,
-      ),
+
+      body:
+        JSON.stringify(
+          payload,
+        ),
+    },
+  );
+}
+
+
+export async function healthCheck() {
+  return requestJson(
+    "/health",
+    {
+      timeoutMs: 5000,
     },
   );
 }
@@ -280,4 +353,11 @@ export async function verifyIntervention(
 
 export function getApiBaseUrl() {
   return API_BASE_URL;
+}
+
+
+export function getFlagshipDefaults() {
+  return {
+    ...FLAGSHIP_DEFAULTS,
+  };
 }
