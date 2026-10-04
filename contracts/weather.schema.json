@@ -1,5 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AERIS Weather",
-  "type": "object"
+  "$id": "aeris/weather",
+  "type": "object",
+  "required": ["id", "geometry", "intensity", "movement", "uncertainty", "type"],
+  "properties": {
+    "id": {"type": "string"}, "geometry": {"type": "object"}, "intensity": {"type": "string"},
+    "movement": {"type": "object"}, "uncertainty": {"type": "number"}, "type": {"type": "string"}
+  }
 }

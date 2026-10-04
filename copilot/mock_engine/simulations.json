@@ -1,0 +1,8 @@
+{
+  "results": [
+    {"candidate_id":"ALT-A","target_delay_delta_min":-8,"affected_flights":6,"network_delay_delta_min":7},
+    {"candidate_id":"ALT-B","target_delay_delta_min":-6,"affected_flights":4,"network_delay_delta_min":2},
+    {"candidate_id":"ALT-C","target_delay_delta_min":-5,"affected_flights":3,"network_delay_delta_min":1},
+    {"candidate_id":"ALT-D","target_delay_delta_min":-2,"affected_flights":1,"network_delay_delta_min":-14}
+  ]
+}

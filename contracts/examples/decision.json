@@ -1,0 +1,15 @@
+{
+  "target_flight_id": "F102",
+  "recommendation": "ALT-D",
+  "confidence": 0.91,
+  "summary": "Slightly slower locally, substantially more resilient network outcome.",
+  "evidence": [
+    "Avoids projected S5 overload",
+    "Preserves fuel reserve",
+    "Survives all flagship stress scenarios"
+  ],
+  "alternatives": ["ALT-A", "ALT-B", "ALT-C", "ALT-D", "ALT-E"],
+  "critic": {"challenged": "ALT-A", "finding": "Fragile under 20% weather expansion"},
+  "human_approval_required": true,
+  "status": "AWAITING_APPROVAL"
+}

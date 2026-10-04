@@ -1,1 +1,23 @@
-{}
+{
+  "id": "mumbai_weather_crisis",
+  "name": "Mumbai Monsoon Network Disruption",
+  "target_flight_id": "F102",
+  "simulation_minutes": 35,
+  "events": [
+    {"t":0,"event":"baseline"},
+    {"t":5,"event":"convective_weather_develops_near_BOM"},
+    {"t":8,"event":"BOM_arrival_capacity_drops"},
+    {"t":10,"event":"holding_begins"},
+    {"t":12,"event":"bypass_sector_approaches_capacity"},
+    {"t":15,"event":"F102_operational_degradation"},
+    {"t":17,"event":"generate_5_alternatives"},
+    {"t":19,"event":"2_candidates_rejected_by_hard_constraints"},
+    {"t":21,"event":"evaluate_remaining_3"},
+    {"t":24,"event":"stress_test_3_futures"},
+    {"t":26,"event":"critic_challenges_leader"},
+    {"t":28,"event":"recommend_resilient_option"},
+    {"t":30,"event":"dispatcher_approval"},
+    {"t":32,"event":"verify_network_improvement"},
+    {"t":35,"event":"continue_monitoring"}
+  ]
+}

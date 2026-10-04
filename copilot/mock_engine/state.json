@@ -1,0 +1,5 @@
+{
+  "status": "OBSERVING",
+  "target_flight_id": "F102",
+  "note": "Deterministic mock fixture for frontend/agent development."
+}

@@ -1,5 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AERIS Verification",
-  "type": "object"
+  "$id": "aeris/verification",
+  "type": "object",
+  "required": ["status", "constraints_safe"],
+  "properties": {
+    "status": {"type": "string"}, "target_delay_delta_min": {"type": "number"},
+    "affected_flights": {"type": "integer"}, "network_delay_delta_min": {"type": "number"},
+    "constraints_safe": {"type": "boolean"}, "new_degradation": {"type": "boolean"},
+    "reassessment_required": {"type": "boolean"}
+  }
 }

@@ -1,5 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AERIS Flight",
-  "type": "object"
+  "$id": "aeris/flight",
+  "type": "object",
+  "required": ["id", "callsign", "position", "altitude_ft", "speed_kt", "route", "destination", "fuel_remaining_min", "status"],
+  "properties": {
+    "id": {"type": "string"}, "callsign": {"type": "string"},
+    "position": {"type": "object", "required": ["lat", "lon"], "properties": {"lat": {"type": "number"}, "lon": {"type": "number"}}},
+    "altitude_ft": {"type": "number"}, "speed_kt": {"type": "number"}, "heading_deg": {"type": "number"},
+    "route": {"type": "array", "items": {"type": "string"}}, "destination": {"type": "string"},
+    "fuel_remaining_min": {"type": "number"}, "burn_rate_min_per_min": {"type": "number"},
+    "performance_class": {"type": "string"}, "status": {"type": "string"}
+  }
 }

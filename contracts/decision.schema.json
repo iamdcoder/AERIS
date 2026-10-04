@@ -1,5 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AERIS Decision",
-  "type": "object"
+  "$id": "aeris/decision",
+  "type": "object",
+  "required": ["target_flight_id", "recommendation", "human_approval_required", "status"],
+  "properties": {
+    "target_flight_id": {"type": "string"}, "recommendation": {"type": "string"}, "confidence": {"type": "number"},
+    "summary": {"type": "string"}, "evidence": {"type": "array"}, "alternatives": {"type": "array"},
+    "critic": {"type": "object"}, "human_approval_required": {"type": "boolean"}, "status": {"type": "string"}
+  }
 }

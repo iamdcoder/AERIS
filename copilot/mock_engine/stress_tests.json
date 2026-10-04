@@ -1,0 +1,8 @@
+{
+  "results": [
+    {"candidate_id":"ALT-A","passed":2,"total":5,"critical_failure":"S5 overload after weather expansion"},
+    {"candidate_id":"ALT-B","passed":3,"total":5,"critical_failure":"Weak under 15% capacity reduction"},
+    {"candidate_id":"ALT-C","passed":4,"total":5,"critical_failure":"Downstream airport degradation"},
+    {"candidate_id":"ALT-D","passed":5,"total":5,"critical_failure":null}
+  ]
+}

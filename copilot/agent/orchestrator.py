@@ -1,1 +1,3 @@
-# AERIS scaffold file
+# PERSON 2 OWNED — Main tool-using orchestration flow.
+
+# TODO: OBSERVE → DIAGNOSE → PLAN → EVALUATE → STRESS TEST → CRITIC → RECOMMEND → APPROVAL → VERIFY

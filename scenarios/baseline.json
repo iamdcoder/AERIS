@@ -1,1 +1,6 @@
-{}
+{
+  "id": "baseline",
+  "name": "Stable baseline",
+  "description": "30–50 aircraft, normal weather, normal airport and sector capacity.",
+  "perturbations": []
+}

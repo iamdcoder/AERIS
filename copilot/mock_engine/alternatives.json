@@ -1,0 +1,9 @@
+{
+  "alternatives": [
+    {"candidate_id":"ALT-A","feasible":true,"target_delay_min":2,"network_delay_delta_min":7,"stress_survival":{"passed":2,"total":5}},
+    {"candidate_id":"ALT-B","feasible":true,"target_delay_min":4,"network_delay_delta_min":2,"stress_survival":{"passed":3,"total":5}},
+    {"candidate_id":"ALT-C","feasible":true,"target_delay_min":5,"network_delay_delta_min":1,"stress_survival":{"passed":4,"total":5}},
+    {"candidate_id":"ALT-D","feasible":true,"target_delay_min":8,"network_delay_delta_min":-14,"stress_survival":{"passed":5,"total":5}},
+    {"candidate_id":"ALT-E","feasible":false,"target_delay_min":10,"network_delay_delta_min":-18,"stress_survival":{"passed":5,"total":5},"rejection_reasons":["Fuel reserve margin below hard minimum"]}
+  ]
+}

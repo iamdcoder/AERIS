@@ -1,0 +1,11 @@
+body { margin: 0; font-family: Arial, sans-serif; background: #071018; color: #e9f2f7; }
+* { box-sizing: border-box; }
+.app { min-height: 100vh; padding: 16px; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border: 1px solid #1d3947; }
+.topbar span { margin-left: 10px; opacity: .7; }
+.status { font-size: 12px; opacity: .7; }
+.workspace { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; margin-top: 16px; }
+.bottom-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-top: 16px; }
+.map, .panel, .alert { border: 1px solid #1d3947; background: #0b1720; padding: 16px; }
+.map { min-height: 520px; display: grid; place-items: center; }
+@media (max-width: 1000px) { .workspace, .bottom-grid { grid-template-columns: 1fr; } }

@@ -1,0 +1,13 @@
+{
+  "airports": [
+    {
+      "id": "BOM",
+      "name": "Chhatrapati Shivaji Maharaj International Airport",
+      "lat": 19.0896,
+      "lon": 72.8656,
+      "arrival_capacity": 30,
+      "departure_capacity": 30,
+      "operational_status": "NORMAL"
+    }
+  ]
+}

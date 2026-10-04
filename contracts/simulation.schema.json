@@ -1,5 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AERIS Simulation",
-  "type": "object"
+  "$id": "aeris/simulation",
+  "type": "object",
+  "required": ["candidate_id", "target_delay_delta_min", "affected_flights", "network_delay_delta_min"],
+  "properties": {
+    "candidate_id": {"type": "string"}, "target_delay_delta_min": {"type": "number"},
+    "fuel_effect_min": {"type": "number"}, "affected_flights": {"type": "integer"},
+    "network_delay_delta_min": {"type": "number"}, "sector_utilization": {"type": "object"},
+    "conflict_impact": {"type": "object"}, "cascade_indicators": {"type": "object"}
+  }
 }
