@@ -7,11 +7,51 @@ from pydantic import BaseModel, Field
 
 
 class NoFeasibleCandidateError(RuntimeError):
-    """
-    Raised when no candidate satisfies the current hard constraints.
-    """
-
     pass
+
+
+def feasible_candidates(
+    candidates: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    return [
+        candidate
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        and candidate.get("feasible") is True
+    ]
+
+
+def select_initial_leader(
+    candidates: Iterable[Dict[str, Any]],
+) -> Dict[str, Any]:
+    feasible = feasible_candidates(candidates)
+
+    if not feasible:
+        raise NoFeasibleCandidateError(
+            "No safe candidate satisfies current hard constraints."
+        )
+
+    return sorted(
+        feasible,
+        key=lambda candidate: (
+            -float(
+                candidate.get(
+                    "local_score",
+                    candidate.get(
+                        "immediate_score",
+                        0.0,
+                    ),
+                )
+                or 0.0
+            ),
+            str(
+                candidate.get(
+                    "candidate_id",
+                    "",
+                )
+            ),
+        ),
+    )[0]
 
 
 class InterventionType(str, Enum):
@@ -24,27 +64,45 @@ class InterventionType(str, Enum):
 
 class InterventionIntent(BaseModel):
     intervention_type: InterventionType
-    priority: int = Field(ge=0, le=100)
+    priority: int = Field(
+        ge=0,
+        le=100,
+    )
+
     rationale: str
-    required_tools: List[str] = Field(default_factory=list)
+
+    required_tools: List[str] = Field(
+        default_factory=list
+    )
+
     candidate_generation: bool = True
 
 
 class InterventionPlan(BaseModel):
     scenario_id: str
+
     target_flight_id: str
+
     primary_intervention: InterventionType
+
     intervention_intents: List[InterventionIntent] = Field(
         default_factory=list
     )
+
     candidate_budget: int = Field(
         default=5,
         ge=1,
         le=5,
     )
+
     generate_candidates: bool = True
+
     rationale: str
-    evidence_signals: List[str] = Field(default_factory=list)
+
+    evidence_signals: List[str] = Field(
+        default_factory=list
+    )
+
     fallback_intervention: InterventionType = (
         InterventionType.MONITOR
     )
@@ -118,88 +176,12 @@ class PlannerSignals(BaseModel):
     disruption_present: bool = False
 
 
-def feasible_candidates(
-    candidates: Iterable[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """
-    Return only candidates that explicitly satisfy hard constraints.
-
-    This helper is intentionally conservative:
-    anything that is not explicitly marked feasible=True is excluded.
-    """
-    feasible: List[Dict[str, Any]] = []
-
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-
-        if candidate.get("feasible") is True:
-            feasible.append(candidate)
-
-    return feasible
-
-
-def select_initial_leader(
-    candidates: Iterable[Dict[str, Any]],
-) -> Dict[str, Any]:
-    """
-    Select the preliminary leader using immediate/local criteria.
-
-    This is deliberately NOT the final AERIS decision.
-
-    The final recommendation is allowed to change after:
-    - network simulation;
-    - stress testing;
-    - critic challenge;
-    - resilience-aware scoring.
-
-    The preliminary leader is simply the strongest feasible
-    candidate on local/immediate score.
-    """
-    feasible = feasible_candidates(candidates)
-
-    if not feasible:
-        raise NoFeasibleCandidateError(
-            "No safe candidate satisfies current hard constraints."
-        )
-
-    def sort_key(candidate: Dict[str, Any]) -> tuple:
-        raw_score = candidate.get(
-            "local_score",
-            candidate.get("immediate_score", 0.0),
-        )
-
-        try:
-            local_score = float(raw_score)
-        except (TypeError, ValueError):
-            local_score = 0.0
-
-        candidate_id = str(
-            candidate.get(
-                "candidate_id",
-                "",
-            )
-        )
-
-        return (
-            -local_score,
-            candidate_id,
-        )
-
-    return sorted(
-        feasible,
-        key=sort_key,
-    )[0]
-
-
 class InterventionPlanner:
     """
     Deterministic intervention-selection policy.
 
-    The planner decides which intervention families deserve evaluation.
-    It does not perform aviation calculations and does not declare a route
-    operationally feasible. Deterministic tools remain authoritative for
-    those decisions.
+    The planner selects which intervention families should be evaluated.
+    It does not calculate aviation legality or operational feasibility.
     """
 
     CANDIDATE_TOOLS: Sequence[str] = (
@@ -214,7 +196,9 @@ class InterventionPlanner:
         world_state: Any,
         diagnosis: Optional[Any] = None,
     ) -> InterventionPlan:
-        state = self._as_dict(world_state)
+        state = self._as_dict(
+            world_state
+        )
 
         scenario_id = str(
             state.get(
@@ -280,18 +264,6 @@ class InterventionPlanner:
             generate_candidates=generate_candidates,
         )
 
-        rationale = self._build_rationale(
-            primary=primary,
-            signals=signals,
-            intents=intents,
-        )
-
-        evidence_signals = (
-            self._build_evidence_signals(
-                signals
-            )
-        )
-
         return InterventionPlan(
             scenario_id=scenario_id,
             target_flight_id=target_flight_id,
@@ -305,8 +277,14 @@ class InterventionPlanner:
                 ),
             ),
             generate_candidates=generate_candidates,
-            rationale=rationale,
-            evidence_signals=evidence_signals,
+            rationale=self._build_rationale(
+                primary=primary,
+                signals=signals,
+                intents=intents,
+            ),
+            evidence_signals=self._build_evidence_signals(
+                signals
+            ),
             fallback_intervention=(
                 InterventionType.MONITOR
             ),
@@ -376,7 +354,8 @@ class InterventionPlanner:
 
         significant_weather = (
             severe_weather
-            or "HIGH" in weather_severities
+            or "HIGH"
+            in weather_severities
         )
 
         degraded_airport = any(
@@ -464,7 +443,7 @@ class InterventionPlanner:
         )
 
         disruption_present = (
-            any(alerts)
+            bool(alerts)
             or any(
                 str(
                     self._as_dict(cell).get(
@@ -529,20 +508,26 @@ class InterventionPlanner:
             significant_weather=significant_weather,
             degraded_airport=degraded_airport,
             stressed_sector=stressed_sector,
-            target_degraded=target_status
-            in {
-                "DEGRADED",
-                "AT_RISK",
-                "CRITICAL",
-            },
+            target_degraded=(
+                target_status
+                in {
+                    "DEGRADED",
+                    "AT_RISK",
+                    "CRITICAL",
+                }
+            ),
             active_holding=active_holding,
-            high_urgency=urgency
-            in {
-                "HIGH",
-                "CRITICAL",
-            },
+            high_urgency=(
+                urgency
+                in {
+                    "HIGH",
+                    "CRITICAL",
+                }
+            ),
             low_fuel_margin=low_fuel_margin,
-            critical_fuel_margin=critical_fuel_margin,
+            critical_fuel_margin=(
+                critical_fuel_margin
+            ),
             disruption_present=(
                 disruption_present
             ),
@@ -609,9 +594,11 @@ class InterventionPlanner:
             ] += 30
 
         if signals.low_fuel_margin:
+            # Fuel pressure should materially increase diversion /
+            # alternate priority over simply waiting in holding.
             priorities[
                 InterventionType.ALTERNATE_DIVERSION
-            ] += 30
+            ] += 46
 
             priorities[
                 InterventionType.TIMING_HOLD
@@ -655,7 +642,9 @@ class InterventionPlanner:
             InterventionType.TIMING_HOLD,
             InterventionType.ALTERNATE_DIVERSION,
         ):
-            priorities[intervention_type] = max(
+            priorities[
+                intervention_type
+            ] = max(
                 0,
                 min(
                     100,
@@ -680,9 +669,9 @@ class InterventionPlanner:
         rationale_by_type = {
             InterventionType.REROUTE:
                 (
-                    "Evaluate spatially separated "
-                    "alternatives that redistribute "
-                    "demand away from the disrupted corridor."
+                    "Evaluate spatially separated alternatives "
+                    "that redistribute demand away from the "
+                    "disrupted corridor."
                 ),
             InterventionType.ALTITUDE_SPEED:
                 (
@@ -819,7 +808,8 @@ class InterventionPlanner:
         if secondary:
             return (
                 f"Primary intervention: {primary.value}. "
-                f"Observed drivers: {', '.join(active_factors)}. "
+                f"Observed drivers: "
+                f"{', '.join(active_factors)}. "
                 f"Also evaluate: {', '.join(secondary)}. "
                 "Candidate generation remains subordinate to "
                 "deterministic validation, network simulation, "
@@ -828,7 +818,8 @@ class InterventionPlanner:
 
         return (
             f"Primary intervention: {primary.value}. "
-            f"Observed drivers: {', '.join(active_factors)}. "
+            f"Observed drivers: "
+            f"{', '.join(active_factors)}. "
             "Candidate generation remains subordinate to "
             "deterministic validation, network simulation, "
             "and future stress testing."

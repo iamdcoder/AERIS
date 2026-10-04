@@ -68,7 +68,28 @@ class DecisionLifecycleController:
         executor: Optional[InterventionExecutor] = None,
         verifier: Optional[InterventionVerifier] = None,
         reassessor: Optional[CandidateReassessor] = None,
+        engine: Optional[Any] = None,
     ) -> None:
+        self.executor = (
+            executor
+            or InterventionExecutor(
+                engine=engine
+            )
+        )
+    
+        self.verifier = (
+            verifier
+            or InterventionVerifier(
+                engine=engine
+            )
+        )
+    
+        self.reassessor = (
+            reassessor
+            or CandidateReassessor(
+                ranker=DecisionRanker()
+            )
+        )
         self.executor = (
             executor
             or InterventionExecutor()

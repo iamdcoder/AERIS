@@ -25,7 +25,6 @@ class ExecutionMode(str, Enum):
 class ExecutionRequest(BaseModel):
     candidate_id: str
     target_flight_id: str
-
     approval_record_id: str
     approved_by: str
 
@@ -54,6 +53,7 @@ class ExecutionResult(BaseModel):
     )
 
     tool_name: Optional[str] = None
+
     tool_data: Dict[str, Any] = Field(
         default_factory=dict
     )
@@ -63,17 +63,20 @@ class ExecutionResult(BaseModel):
 
 class InterventionExecutor:
     """
-    Simulation-safe execution boundary.
+    Human-approved execution boundary.
 
-    The executor can call an engine-side apply tool when one exists.
-    Until the real engine exposes that tool, it falls back to the
-    deterministic simulation result already produced earlier.
+    Gemini never reaches this class directly.
 
-    Crucially:
-        no APPROVED record -> no execution
+    Once a human approval record exists, the executor can use the
+    deterministic engine adapter directly. If no engine is supplied,
+    deterministic simulation fallback remains available.
     """
 
-    APPLY_TOOL_NAME = "apply_intervention"
+    def __init__(
+        self,
+        engine: Optional[Any] = None,
+    ) -> None:
+        self.engine = engine
 
     def execute(
         self,
@@ -83,7 +86,9 @@ class InterventionExecutor:
         registry: Optional[Any] = None,
         simulation: Optional[Mapping[str, Any]] = None,
     ) -> ExecutionResult:
-        candidate_id = self._candidate_id(candidate)
+        candidate_id = self._candidate_id(
+            candidate
+        )
 
         if (
             approval_record.decision
@@ -104,7 +109,10 @@ class InterventionExecutor:
                 ),
             )
 
-        if approval_record.candidate_id != candidate_id:
+        if (
+            approval_record.candidate_id
+            != candidate_id
+        ):
             return ExecutionResult(
                 candidate_id=candidate_id,
                 target_flight_id=target_flight_id,
@@ -120,14 +128,26 @@ class InterventionExecutor:
                 ),
             )
 
-        simulation = simulation or {}
+        if self.engine is not None:
+            engine_result = (
+                self._execute_with_engine(
+                    approval_record=approval_record,
+                    target_flight_id=target_flight_id,
+                    candidate=candidate,
+                )
+            )
+
+            if engine_result is not None:
+                return engine_result
 
         if registry is not None:
-            engine_result = self._try_engine_execution(
-                registry=registry,
-                approval_record=approval_record,
-                target_flight_id=target_flight_id,
-                candidate=candidate,
+            engine_result = (
+                self._try_engine_execution(
+                    registry=registry,
+                    approval_record=approval_record,
+                    target_flight_id=target_flight_id,
+                    candidate=candidate,
+                )
             )
 
             if engine_result is not None:
@@ -137,7 +157,57 @@ class InterventionExecutor:
             approval_record=approval_record,
             target_flight_id=target_flight_id,
             candidate=candidate,
-            simulation=simulation,
+            simulation=simulation or {},
+        )
+
+    def _execute_with_engine(
+        self,
+        approval_record: ApprovalRecord,
+        target_flight_id: str,
+        candidate: Mapping[str, Any],
+    ) -> Optional[ExecutionResult]:
+        try:
+            result = self.engine.apply_intervention(
+                approval_record.candidate_id
+            )
+        except Exception as exc:
+            return ExecutionResult(
+                candidate_id=(
+                    approval_record.candidate_id
+                ),
+                target_flight_id=target_flight_id,
+                status=ExecutionStatus.FAILED,
+                mode=ExecutionMode.ENGINE,
+                approval_verified=True,
+                summary=(
+                    "The human-approved intervention reached "
+                    "the deterministic engine but execution failed."
+                ),
+                tool_name="engine.apply_intervention",
+                error_message=str(exc),
+            )
+
+        data = (
+            result
+            if isinstance(result, dict)
+            else {}
+        )
+
+        return ExecutionResult(
+            candidate_id=(
+                approval_record.candidate_id
+            ),
+            target_flight_id=target_flight_id,
+            status=ExecutionStatus.EXECUTED,
+            mode=ExecutionMode.ENGINE,
+            approval_verified=True,
+            summary=(
+                "Human-approved intervention was applied "
+                "through the deterministic engine adapter."
+            ),
+            after_state=data,
+            tool_name="engine.apply_intervention",
+            tool_data=data,
         )
 
     def _try_engine_execution(
@@ -148,18 +218,22 @@ class InterventionExecutor:
         candidate: Mapping[str, Any],
     ) -> Optional[ExecutionResult]:
         arguments = {
-            "candidate_id": approval_record.candidate_id,
+            "candidate_id": (
+                approval_record.candidate_id
+            ),
             "flight_id": target_flight_id,
-            "approved_by": approval_record.decided_by,
+            "approved_by": (
+                approval_record.decided_by
+            ),
             "approval_id": (
-                f"{approval_record.recommendation_id}"
+                approval_record.recommendation_id
             ),
             "candidate": dict(candidate),
         }
 
         try:
             result = registry.invoke(
-                self.APPLY_TOOL_NAME,
+                "apply_intervention",
                 arguments,
             )
         except (
@@ -170,28 +244,34 @@ class InterventionExecutor:
         ):
             return None
 
-        ok = self._tool_ok(result)
-
-        if not ok:
+        if not self._tool_ok(result):
             return ExecutionResult(
-                candidate_id=approval_record.candidate_id,
+                candidate_id=(
+                    approval_record.candidate_id
+                ),
                 target_flight_id=target_flight_id,
                 status=ExecutionStatus.FAILED,
                 mode=ExecutionMode.ENGINE,
                 approval_verified=True,
                 summary=(
-                    "The approved intervention reached the engine "
-                    "but execution failed."
+                    "The approved intervention reached the "
+                    "engine adapter but execution failed."
                 ),
-                tool_name=self.APPLY_TOOL_NAME,
+                tool_name="apply_intervention",
                 tool_data=self._tool_data(result),
-                error_message=self._tool_error(result),
+                error_message=self._tool_error(
+                    result
+                ),
             )
 
-        data = self._tool_data(result)
+        data = self._tool_data(
+            result
+        )
 
         return ExecutionResult(
-            candidate_id=approval_record.candidate_id,
+            candidate_id=(
+                approval_record.candidate_id
+            ),
             target_flight_id=target_flight_id,
             status=ExecutionStatus.EXECUTED,
             mode=ExecutionMode.ENGINE,
@@ -200,11 +280,8 @@ class InterventionExecutor:
                 "Human-approved intervention executed through "
                 "the deterministic engine adapter."
             ),
-            after_state=data.get(
-                "after_state",
-                data,
-            ) if isinstance(data, dict) else {},
-            tool_name=self.APPLY_TOOL_NAME,
+            after_state=data,
+            tool_name="apply_intervention",
             tool_data=data,
         )
 
@@ -215,16 +292,9 @@ class InterventionExecutor:
         candidate: Mapping[str, Any],
         simulation: Mapping[str, Any],
     ) -> ExecutionResult:
-        """
-        Deterministic mock-engine execution.
-
-        This does not pretend to control a real aircraft. It records
-        the selected intervention as applied to the simulated scenario
-        and carries forward the previously computed counterfactual
-        network outcome.
-        """
-
-        candidate_id = self._candidate_id(candidate)
+        candidate_id = self._candidate_id(
+            candidate
+        )
 
         after_state = {
             key: value
@@ -242,18 +312,19 @@ class InterventionExecutor:
             mode=ExecutionMode.SIMULATION_FALLBACK,
             approval_verified=True,
             summary=(
-                "Human-approved intervention applied to the "
-                "deterministic simulated scenario."
+                "Human-approved intervention applied to "
+                "the deterministic simulated scenario."
             ),
             before_state={
                 "candidate_id": candidate_id,
                 "flight_id": target_flight_id,
             },
             after_state=after_state,
-            tool_name=None,
             tool_data={
                 "mode": "SIMULATION_FALLBACK",
-                "source": "deterministic network simulation",
+                "source": (
+                    "deterministic network simulation"
+                ),
             },
         )
 
@@ -281,11 +352,22 @@ class InterventionExecutor:
         if result is None:
             return False
 
-        if hasattr(result, "ok"):
+        if hasattr(
+            result,
+            "ok",
+        ):
             return bool(result.ok)
 
-        if isinstance(result, dict):
-            return bool(result.get("ok", False))
+        if isinstance(
+            result,
+            dict,
+        ):
+            return bool(
+                result.get(
+                    "ok",
+                    False,
+                )
+            )
 
         return False
 
@@ -293,15 +375,37 @@ class InterventionExecutor:
     def _tool_data(
         result: Any,
     ) -> Dict[str, Any]:
-        if hasattr(result, "data"):
+        if hasattr(
+            result,
+            "data",
+        ):
             data = result.data
+            return (
+                data
+                if isinstance(
+                    data,
+                    dict,
+                )
+                else {}
+            )
 
-            return data if isinstance(data, dict) else {}
+        if isinstance(
+            result,
+            dict,
+        ):
+            data = result.get(
+                "data",
+                {},
+            )
 
-        if isinstance(result, dict):
-            data = result.get("data", {})
-
-            return data if isinstance(data, dict) else {}
+            return (
+                data
+                if isinstance(
+                    data,
+                    dict,
+                )
+                else {}
+            )
 
         return {}
 
@@ -310,21 +414,31 @@ class InterventionExecutor:
         result: Any,
     ) -> Optional[str]:
         if result is None:
-            return "Engine returned no execution result."
+            return (
+                "Engine returned no execution result."
+            )
 
-        if hasattr(result, "error_message"):
+        if hasattr(
+            result,
+            "error_message",
+        ):
             if result.error_message:
-                return str(result.error_message)
+                return str(
+                    result.error_message
+                )
 
-        if isinstance(result, dict):
-            value = result.get("error_message")
-
-            if value:
-                return str(value)
-
-            value = result.get("error")
-
-            if value:
-                return str(value)
+        if isinstance(
+            result,
+            dict,
+        ):
+            return str(
+                result.get(
+                    "error_message",
+                    result.get(
+                        "error",
+                        "Engine execution failed.",
+                    ),
+                )
+            )
 
         return "Engine execution failed."

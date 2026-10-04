@@ -5,7 +5,10 @@ from typing import Any, Dict, Mapping, Optional
 
 from pydantic import BaseModel, Field
 
-from copilot.agent.execution import ExecutionResult, ExecutionStatus
+from copilot.agent.execution import (
+    ExecutionResult,
+    ExecutionStatus,
+)
 
 
 class VerificationStatus(str, Enum):
@@ -38,27 +41,27 @@ class VerificationResult(BaseModel):
         default_factory=list
     )
 
-    source: str
+    source: str = ""
 
     reassessment_reason: Optional[str] = None
 
 
 class InterventionVerifier:
     """
-    Post-decision verification layer.
+    Post-action verifier.
 
-    Preferred path:
-        deterministic engine verification tool.
+    When connected to the deterministic engine, the engine's actual
+    verification result is authoritative.
 
-    Current mock-compatible path:
-        deterministic checks against the already-computed network
-        simulation outcome.
-
-    This lets the project demonstrate the full lifecycle now without
-    inventing a real aviation-control interface.
+    Without an engine, previously-computed deterministic simulation
+    evidence remains available as the fallback path.
     """
 
-    VERIFY_TOOL_NAME = "verify_intervention"
+    def __init__(
+        self,
+        engine: Optional[Any] = None,
+    ) -> None:
+        self.engine = engine
 
     def verify(
         self,
@@ -66,7 +69,10 @@ class InterventionVerifier:
         registry: Optional[Any] = None,
         simulation: Optional[Mapping[str, Any]] = None,
     ) -> VerificationResult:
-        if execution.status != ExecutionStatus.EXECUTED:
+        if (
+            execution.status
+            != ExecutionStatus.EXECUTED
+        ):
             return VerificationResult(
                 candidate_id=execution.candidate_id,
                 target_flight_id=execution.target_flight_id,
@@ -81,18 +87,155 @@ class InterventionVerifier:
                 ),
             )
 
-        if registry is not None:
-            engine_result = self._try_engine_verification(
-                execution=execution,
-                registry=registry,
+        if self.engine is not None:
+            result = (
+                self._verify_with_engine(
+                    execution
+                )
             )
 
-            if engine_result is not None:
-                return engine_result
+            if result is not None:
+                return result
+
+        if registry is not None:
+            result = (
+                self._try_engine_verification(
+                    execution=execution,
+                    registry=registry,
+                )
+            )
+
+            if result is not None:
+                return result
 
         return self._deterministic_verification(
             execution=execution,
-            simulation=simulation or execution.after_state,
+            simulation=(
+                simulation
+                or execution.after_state
+            ),
+        )
+
+    def _verify_with_engine(
+        self,
+        execution: ExecutionResult,
+    ) -> Optional[VerificationResult]:
+        try:
+            data = self.engine.verify_state(
+                execution.candidate_id
+            )
+        except Exception as exc:
+            return VerificationResult(
+                candidate_id=execution.candidate_id,
+                target_flight_id=execution.target_flight_id,
+                status=VerificationStatus.FAILED,
+                summary=(
+                    "The deterministic engine could not "
+                    "complete post-action verification."
+                ),
+                source="deterministic engine",
+                reassessment_reason=str(exc),
+            )
+
+        status = str(
+            data.get(
+                "status",
+                "",
+            )
+        ).upper()
+
+        if status == "VERIFIED":
+            verification_status = (
+                VerificationStatus.VERIFIED
+            )
+
+        elif status == "REASSESSMENT_REQUIRED":
+            verification_status = (
+                VerificationStatus.REASSESSMENT_REQUIRED
+            )
+
+        else:
+            verification_status = (
+                VerificationStatus.FAILED
+            )
+
+        failed_checks = []
+
+        if not data.get(
+            "constraints_safe",
+            True,
+        ):
+            failed_checks.append(
+                "constraints_safe"
+            )
+
+        if data.get(
+            "new_degradation",
+            False,
+        ):
+            failed_checks.append(
+                "new_degradation"
+            )
+
+        checks = {
+            "constraints_safe": bool(
+                data.get(
+                    "constraints_safe",
+                    True,
+                )
+            ),
+            "no_new_degradation": not bool(
+                data.get(
+                    "new_degradation",
+                    False,
+                )
+            ),
+            "reassessment_required": not bool(
+                data.get(
+                    "reassessment_required",
+                    False,
+                )
+            ),
+        }
+
+        return VerificationResult(
+            candidate_id=execution.candidate_id,
+            target_flight_id=execution.target_flight_id,
+            status=verification_status,
+            summary=(
+                (
+                    "The deterministic engine verified the "
+                    "human-approved intervention."
+                )
+                if verification_status
+                == VerificationStatus.VERIFIED
+                else (
+                    "The deterministic engine detected a "
+                    "post-action condition requiring reassessment."
+                )
+                if verification_status
+                == VerificationStatus.REASSESSMENT_REQUIRED
+                else (
+                    "The deterministic engine could not "
+                    "verify the intervention."
+                )
+            ),
+            before_metrics=(
+                execution.before_state
+            ),
+            after_metrics=dict(
+                data
+            ),
+            checks=checks,
+            failed_checks=failed_checks,
+            source="deterministic engine",
+            reassessment_reason=(
+                "Verification detected a condition that "
+                "requires reassessment."
+                if verification_status
+                == VerificationStatus.REASSESSMENT_REQUIRED
+                else None
+            ),
         )
 
     def _try_engine_verification(
@@ -107,7 +250,7 @@ class InterventionVerifier:
 
         try:
             result = registry.invoke(
-                self.VERIFY_TOOL_NAME,
+                "verify_intervention",
                 arguments,
             )
         except (
@@ -118,10 +261,7 @@ class InterventionVerifier:
         ):
             return None
 
-        ok = self._tool_ok(result)
-        data = self._tool_data(result)
-
-        if not ok:
+        if not self._tool_ok(result):
             return VerificationResult(
                 candidate_id=execution.candidate_id,
                 target_flight_id=execution.target_flight_id,
@@ -129,44 +269,53 @@ class InterventionVerifier:
                 summary=(
                     "Engine verification failed after execution."
                 ),
-                after_metrics=data,
+                after_metrics=self._tool_data(
+                    result
+                ),
                 source="deterministic engine",
                 reassessment_reason=(
                     self._tool_error(result)
-                    or "Verification tool failed."
                 ),
             )
 
-        verified = self._verified_flag(data)
+        data = self._tool_data(
+            result
+        )
+
+        verified = data.get(
+            "verified"
+        )
 
         if verified is False:
-            return VerificationResult(
-                candidate_id=execution.candidate_id,
-                target_flight_id=execution.target_flight_id,
-                status=VerificationStatus.REASSESSMENT_REQUIRED,
-                summary=(
-                    "The engine reports that the applied intervention "
-                    "did not leave the network in the desired state."
-                ),
-                after_metrics=data,
-                source="deterministic engine",
-                reassessment_reason=(
-                    "Post-execution verification detected degradation."
-                ),
+            status = (
+                VerificationStatus.REASSESSMENT_REQUIRED
+            )
+        else:
+            status = (
+                VerificationStatus.VERIFIED
             )
 
         return VerificationResult(
             candidate_id=execution.candidate_id,
             target_flight_id=execution.target_flight_id,
-            status=VerificationStatus.VERIFIED,
+            status=status,
             summary=(
                 "The deterministic engine verified the "
                 "human-approved intervention."
+                if status
+                == VerificationStatus.VERIFIED
+                else (
+                    "The engine reports that the applied "
+                    "intervention requires reassessment."
+                )
             ),
             before_metrics=execution.before_state,
             after_metrics=data,
             checks={
-                "engine_verified": True,
+                "engine_verified": (
+                    status
+                    == VerificationStatus.VERIFIED
+                )
             },
             source="deterministic engine",
         )
@@ -193,6 +342,12 @@ class InterventionVerifier:
                 "sector_peak_utilization",
             ),
         )
+
+        if (
+            peak_sector_utilization is not None
+            and peak_sector_utilization > 1
+        ):
+            peak_sector_utilization /= 100
 
         new_conflicts = self._number(
             simulation,
@@ -255,28 +410,35 @@ class InterventionVerifier:
                 )
 
         if downstream_risk is not None:
-            normalized = downstream_risk.lower()
-
-            checks["downstream_risk_acceptable"] = (
-                normalized
-                not in {
-                    "critical",
-                    "high",
-                    "severe",
-                }
+            normalized = (
+                downstream_risk.lower()
             )
 
-            if not checks["downstream_risk_acceptable"]:
+            checks[
+                "downstream_risk_acceptable"
+            ] = normalized not in {
+                "critical",
+                "high",
+                "severe",
+            }
+
+            if not checks[
+                "downstream_risk_acceptable"
+            ]:
                 failed_checks.append(
                     "downstream_risk"
                 )
 
         if network_delay is not None:
-            checks["network_not_worsened"] = (
+            checks[
+                "network_not_worsened"
+            ] = (
                 network_delay <= 0
             )
 
-            if not checks["network_not_worsened"]:
+            if not checks[
+                "network_not_worsened"
+            ]:
                 failed_checks.append(
                     "network_delay"
                 )
@@ -287,8 +449,8 @@ class InterventionVerifier:
                 target_flight_id=execution.target_flight_id,
                 status=VerificationStatus.FAILED,
                 summary=(
-                    "No deterministic post-execution metrics were "
-                    "available for verification."
+                    "No deterministic post-execution metrics "
+                    "were available for verification."
                 ),
                 before_metrics=execution.before_state,
                 after_metrics=dict(simulation),
@@ -346,7 +508,10 @@ class InterventionVerifier:
 
             try:
                 return float(value)
-            except (TypeError, ValueError):
+            except (
+                TypeError,
+                ValueError,
+            ):
                 continue
 
         return None
@@ -365,55 +530,30 @@ class InterventionVerifier:
         return None
 
     @staticmethod
-    def _verified_flag(
-        data: Mapping[str, Any],
-    ) -> Optional[bool]:
-        for key in (
-            "verified",
-            "verification_passed",
-            "safe",
-        ):
-            if key not in data:
-                continue
-
-            value = data[key]
-
-            if isinstance(value, bool):
-                return value
-
-            if isinstance(value, str):
-                normalized = value.lower().strip()
-
-                if normalized in {
-                    "true",
-                    "yes",
-                    "verified",
-                    "safe",
-                }:
-                    return True
-
-                if normalized in {
-                    "false",
-                    "no",
-                    "failed",
-                    "unsafe",
-                }:
-                    return False
-
-        return None
-
-    @staticmethod
     def _tool_ok(
         result: Any,
     ) -> bool:
         if result is None:
             return False
 
-        if hasattr(result, "ok"):
-            return bool(result.ok)
+        if hasattr(
+            result,
+            "ok",
+        ):
+            return bool(
+                result.ok
+            )
 
-        if isinstance(result, dict):
-            return bool(result.get("ok", False))
+        if isinstance(
+            result,
+            dict,
+        ):
+            return bool(
+                result.get(
+                    "ok",
+                    False,
+                )
+            )
 
         return False
 
@@ -421,15 +561,38 @@ class InterventionVerifier:
     def _tool_data(
         result: Any,
     ) -> Dict[str, Any]:
-        if hasattr(result, "data"):
+        if hasattr(
+            result,
+            "data",
+        ):
             data = result.data
 
-            return data if isinstance(data, dict) else {}
+            return (
+                data
+                if isinstance(
+                    data,
+                    dict,
+                )
+                else {}
+            )
 
-        if isinstance(result, dict):
-            data = result.get("data", {})
+        if isinstance(
+            result,
+            dict,
+        ):
+            data = result.get(
+                "data",
+                {},
+            )
 
-            return data if isinstance(data, dict) else {}
+            return (
+                data
+                if isinstance(
+                    data,
+                    dict,
+                )
+                else {}
+            )
 
         return {}
 
@@ -438,16 +601,17 @@ class InterventionVerifier:
         result: Any,
     ) -> Optional[str]:
         if result is None:
-            return None
+            return (
+                "Verification engine returned no result."
+            )
 
-        if hasattr(result, "error_message"):
+        if hasattr(
+            result,
+            "error_message",
+        ):
             if result.error_message:
-                return str(result.error_message)
+                return str(
+                    result.error_message
+                )
 
-        if isinstance(result, dict):
-            value = result.get("error_message")
-
-            if value:
-                return str(value)
-
-        return None
+        return "Verification engine failed."
