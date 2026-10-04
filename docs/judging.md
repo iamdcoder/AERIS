@@ -1,25 +1,159 @@
 # Judge-Facing Proof Points
 
-## Innovation
+## 1. One-sentence description
 
-Network-aware intervention selection rather than route-only optimization.
+> **AERIS is a human-supervised agentic airspace resilience copilot that evaluates a flight intervention by its impact on the whole network and its ability to survive future disruptions.**
 
-## Agentic AI
+---
 
-The agent selects what to investigate, invokes tools, compares evidence, stress-tests and challenges its recommendation.
+## 2. What is innovative
 
-## Technical depth
+The differentiator is not “we used an LLM.”
 
-Deterministic hard constraints, multi-flight counterfactual simulation, future scenario stress testing, explicit metrics and verification.
-
-## Responsible AI
-
-Human approval is mandatory; the system is simulation-only and does not issue operational clearances.
-
-## Memorable contrast
+The differentiator is the decision loop:
 
 ```text
-LOCAL OPTIMUM
-vs
-NETWORK-RESILIENT DECISION
+local flight objective
+        +
+network consequences
+        +
+future stress
+        +
+adversarial challenge
+        +
+human approval
+        +
+post-action verification
 ```
+
+This turns route selection into network-resilience decision support.
+
+---
+
+## 3. The three numbers
+
+Make these prominent:
+
+```text
+TARGET BENEFIT
+NETWORK RIPPLE
+RESILIENCE
+```
+
+For the flagship recommendation:
+
+```text
+Target impact     +4.49 min
+Network ripple   +12.49 min
+Resilience         0.80
+Stress             4/5
+```
+
+---
+
+## 4. The AHA moment
+
+Use the local-vs-network contrast:
+
+```text
+ALT-A
+Local score 0.92
+Network +22.03 min
+Stress 0/5
+
+ALT-D
+Local score 0.63
+Network +12.49 min
+Stress 4/5
+```
+
+Then explain that the critic challenges the locally attractive candidate before the final recommendation is synthesized.
+
+---
+
+## 5. Agentic proof
+
+AERIS is agentic because the system supports a tool-mediated investigation loop rather than a single static LLM prompt.
+
+Observable behavior includes:
+
+- investigating current state;
+- querying targeted tools;
+- collecting structured evidence;
+- planning interventions;
+- evaluating alternatives;
+- running stress tests;
+- challenging the leader;
+- synthesizing the recommendation;
+- waiting for a human;
+- reassessing after rejection.
+
+---
+
+## 6. Technical depth
+
+The project contains:
+
+- a deterministic digital twin;
+- explicit hard constraints;
+- a route graph and candidate generator;
+- multi-flight network simulation;
+- future perturbation stress testing;
+- deterministic multi-objective scoring;
+- an adversarial critic;
+- structured agent state;
+- evidence IDs and event records;
+- approval and rejection lifecycle;
+- post-action verification.
+
+---
+
+## 7. Responsible AI
+
+AERIS demonstrates restraint as part of the product design.
+
+```text
+LLM ≠ operational authority
+LLM ≠ safety calculator
+LLM ≠ autonomous clearance system
+```
+
+The deterministic engine supplies operational evidence, and the human approval boundary prevents a model output from silently becoming an action.
+
+---
+
+## 8. Good judge questions
+
+### “Why not shortest path?”
+
+Because shortest path can create more downstream delay and can be fragile under future conditions.
+
+### “Why is this agentic rather than deterministic?”
+
+The engine remains deterministic, but the agent orchestrates the investigation, tool usage, evidence gathering, challenge and synthesis around the engine.
+
+### “Why do you need a critic?”
+
+The first ranking can reflect current-state trade-offs. The critic intentionally searches for conditions under which the apparent leader becomes fragile.
+
+### “Can I reject the recommendation?”
+
+Yes. Rejection creates a reassessment cycle and a new human-approval state.
+
+### “What if the LLM fails?”
+
+The hybrid path degrades to deterministic investigation when possible.
+
+---
+
+## 9. What not to claim
+
+Do not claim:
+
+- real-time integration with live air traffic unless separately implemented;
+- certified aviation safety;
+- replacement of ATC or dispatch authority;
+- real-world probabilistic safety guarantees;
+- production-scale distributed orchestration.
+
+The project is strongest when its claims remain precise.

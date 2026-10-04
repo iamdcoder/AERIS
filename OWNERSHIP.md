@@ -1,10 +1,12 @@
-# AERIS Ownership & Isolation Rules
+# AERIS Ownership and Integration Boundaries
 
-The repository is intentionally divided so two developers can build in parallel with minimal merge conflicts.
+## Historical two-person ownership model
 
-## Person 1 — Airspace Intelligence Engineer
+The repository was originally divided into two major ownership islands.
 
-### Write access
+### Person 1 — Airspace Intelligence Engineer
+
+Primary area:
 
 ```text
 backend/app/engine/**
@@ -13,45 +15,60 @@ backend/data/**
 backend/tests/engine/**
 ```
 
-### Read-only dependencies
+Typical responsibilities:
 
-```text
-contracts/**
-scenarios/**
-backend/app/api/**
-```
+- digital twin;
+- aircraft / sector / airport state;
+- weather and restrictions;
+- route graph and candidate generation;
+- fuel and performance constraints;
+- conflict detection;
+- sector capacity;
+- network simulation;
+- stress testing;
+- deterministic metrics;
+- engine execution / verification state.
 
-### Owns
+### Person 2 — Agent + Product Engineer
 
-Digital twin, aircraft/sector/airport state, weather/restrictions, route graph and generation, deterministic hard constraints, fuel/performance checks, conflict detection, sector capacity, network simulation, stress testing, metrics, execution state and verification state.
-
-## Person 2 — Agent + Product Engineer
-
-### Write access
+Primary area:
 
 ```text
 copilot/**
 frontend/**
 backend/app/api/**
 backend/tests/api/**
-copilot/tests/**
 ```
 
-### Read-only dependencies
+Typical responsibilities:
+
+- agent orchestration;
+- investigation;
+- tool adapters;
+- planner / scorer / ranker;
+- critic;
+- synthesis;
+- evidence / observability;
+- human approval and reassessment;
+- frontend dashboard;
+- candidate comparison;
+- verification presentation.
+
+---
+
+## Protected engine boundary
+
+The intended cross-module boundary is:
 
 ```text
-contracts/**
-scenarios/**
 backend/app/engine/public.py
-backend/app/models/**
-backend/data/**
 ```
 
-### Owns
+Agent/API code should consume stable public operations or explicit client adapters instead of importing private engine internals.
 
-Agent orchestration, tool adapters, planner/critic/synthesizer, evidence trail, API endpoints, WebSocket adapter, dashboard, map, candidate comparison, approval flow, timeline and verification presentation.
+---
 
-## Shared / coordinated files
+## Shared coordination zones
 
 ```text
 contracts/**
@@ -59,20 +76,14 @@ scenarios/**
 docs/**
 README.md
 CONTRIBUTING.md
-.gitignore
+OWNERSHIP.md
 .env.example
 ```
 
-After Phase 0, contract changes require both developers to agree, update fixtures/mocks/tests, and communicate the change before merging.
+Contract or scenario changes should be treated as coordinated integration work.
 
-## Protected integration boundary
+---
 
-Person 1 exposes stable engine functions through:
+## Current single-developer state
 
-```text
-backend/app/engine/public.py
-```
-
-Person 2 should call the public facade or API adapters rather than importing route/constraint internals.
-
-Person 2 must not modify engine algorithms to make the UI work. Person 1 must not modify API/UI code to expose engine results.
+The project may now be maintained by one developer even though the repository structure preserves the original separation. The ownership document is retained because the separation still helps protect interfaces and makes the architecture understandable to future contributors.
