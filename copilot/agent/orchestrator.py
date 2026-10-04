@@ -1,5 +1,6 @@
 from typing import Any
-
+from copilot.agent.critic import DecisionCritic
+from copilot.agent.synthesizer import DecisionSynthesizer
 from .critic import criticise_candidate
 from .diagnostics import (
     build_causal_diagnosis,
@@ -41,26 +42,10 @@ from copilot.tools import (
 
 
 class AgentOrchestrator:
-    """
-    Main AERIS agent runtime.
-
-    Two investigation modes exist:
-
-    1. Deterministic investigation
-       - fully reproducible
-       - used as fallback
-       - useful for tests and offline operation
-
-    2. Gemini investigation
-       - model selects investigation tools
-       - deterministic tools remain authoritative
-       - evidence is imported into AgentState
-
-    Both paths converge into the same state-machine pipeline.
-    """
 
     def __init__(
         self,
+        
         *,
         registry: ToolRegistry | None = None,
         engine: EngineClient | None = None,
@@ -73,9 +58,10 @@ class AgentOrchestrator:
                 self.engine
             )
         )
-
+        self.critic = DecisionCritic()
+        self.synthesizer = DecisionSynthesizer()
         self.gemini_investigator = (
-            gemini_investigator
+         gemini_investigator
         )
 
         self.evidence = EvidenceStore()
