@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from typing import Any
+
+import networkx as nx
+
 from .interventions import generate_interventions
 
 
-def generate_candidate_routes(graph, flight_id: str) -> list[dict]:
-    """Scenario-aware deterministic candidate generator.
+def generate_candidate_routes(
+    graph: nx.DiGraph,
+    flight_id: str,
+) -> list[dict[str, Any]]:
+    """Scenario-aware candidate generator driving deterministic intervention strategies.
 
-    We intentionally use five distinct intervention strategies for the flagship demo
-    instead of returning five nearly identical k-shortest paths.
+    This function generates deterministic intervention candidates.
+    It does not validate operational constraints; validation happens later in constraints/validator.py.
     """
     return generate_interventions(graph, flight_id)
+
