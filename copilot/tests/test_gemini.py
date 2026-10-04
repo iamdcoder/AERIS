@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+from copilot.agent.gemini_runner import (
+    GeminiInvestigator,
+)
 from copilot.llm import (
     GeminiClient,
 )
@@ -22,23 +25,29 @@ class FakeModels:
         self.calls += 1
 
         if self.calls == 1:
-            function_call = SimpleNamespace(
-                id="call-001",
-                name="get_sector_state",
-                args={
-                    "sector_id": "S5"
-                },
+            function_call = (
+                SimpleNamespace(
+                    id="call-001",
+                    name="get_sector_state",
+                    args={
+                        "sector_id": "S5"
+                    },
+                )
             )
 
-            function_part = SimpleNamespace(
-                function_call=function_call,
-                text=None,
+            function_part = (
+                SimpleNamespace(
+                    function_call=function_call,
+                    text=None,
+                )
             )
 
-            content = SimpleNamespace(
-                parts=[
-                    function_part
-                ]
+            content = (
+                SimpleNamespace(
+                    parts=[
+                        function_part
+                    ]
+                )
             )
 
             return SimpleNamespace(
@@ -50,19 +59,22 @@ class FakeModels:
                 text=None,
             )
 
-        text_part = SimpleNamespace(
-            function_call=None,
-            text=(
-                "Investigation complete. "
-                "Sector S5 is stressed and "
-                "requires network-aware evaluation."
-            ),
+        text_part = (
+            SimpleNamespace(
+                function_call=None,
+                text=(
+                    "Investigation complete. "
+                    "Sector S5 is stressed."
+                ),
+            )
         )
 
-        content = SimpleNamespace(
-            parts=[
-                text_part
-            ]
+        content = (
+            SimpleNamespace(
+                parts=[
+                    text_part
+                ]
+            )
         )
 
         return SimpleNamespace(
@@ -73,13 +85,12 @@ class FakeModels:
             ],
             text=(
                 "Investigation complete. "
-                "Sector S5 is stressed and "
-                "requires network-aware evaluation."
+                "Sector S5 is stressed."
             ),
         )
 
 
-class FakeModelsWithUnknownTool:
+class FakeModelsWithBlockedTool:
     def __init__(self):
         self.calls = 0
 
@@ -92,21 +103,57 @@ class FakeModelsWithUnknownTool:
     ):
         self.calls += 1
 
-        function_call = SimpleNamespace(
-            id="call-unknown",
-            name="invented_tool",
-            args={},
+        if self.calls == 1:
+            function_call = (
+                SimpleNamespace(
+                    id="call-blocked",
+                    name="generate_alternatives",
+                    args={
+                        "flight_id": "F102"
+                    },
+                )
+            )
+
+            function_part = (
+                SimpleNamespace(
+                    function_call=function_call,
+                    text=None,
+                )
+            )
+
+            content = (
+                SimpleNamespace(
+                    parts=[
+                        function_part
+                    ]
+                )
+            )
+
+            return SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=content
+                    )
+                ],
+                text=None,
+            )
+
+        text_part = (
+            SimpleNamespace(
+                function_call=None,
+                text=(
+                    "The requested planning tool "
+                    "was unavailable during investigation."
+                ),
+            )
         )
 
-        function_part = SimpleNamespace(
-            function_call=function_call,
-            text=None,
-        )
-
-        content = SimpleNamespace(
-            parts=[
-                function_part
-            ]
+        content = (
+            SimpleNamespace(
+                parts=[
+                    text_part
+                ]
+            )
         )
 
         return SimpleNamespace(
@@ -115,15 +162,26 @@ class FakeModelsWithUnknownTool:
                     content=content
                 )
             ],
-            text=None,
+            text=(
+                "The requested planning tool "
+                "was unavailable during investigation."
+            ),
         )
 
 
-def test_gemini_client_executes_model_requested_tool():
+def _build_fake_client(
+    fake_models,
+):
+    return SimpleNamespace(
+        models=fake_models
+    )
+
+
+def test_gemini_client_executes_allowed_tool():
     fake_models = FakeModels()
 
-    fake_client = SimpleNamespace(
-        models=fake_models
+    fake_client = _build_fake_client(
+        fake_models
     )
 
     registry = (
@@ -135,14 +193,13 @@ def test_gemini_client_executes_model_requested_tool():
         model="test-model",
     )
 
-    result = client.run(
-        prompt=(
-            "Investigate F102."
-        ),
+    investigator = GeminiInvestigator(
         registry=registry,
-        system_instruction=(
-            "Use tools to investigate."
-        ),
+        gemini_client=client,
+    )
+
+    result = (
+        investigator.investigate()
     )
 
     assert (
@@ -169,19 +226,60 @@ def test_gemini_client_executes_model_requested_tool():
         is True
     )
 
+
+def test_investigator_exposes_only_policy_allowed_tools():
+    investigator = GeminiInvestigator()
+
+    names = {
+        item["name"]
+        for item
+        in investigator.tool_definitions()
+    }
+
+    assert names == {
+        "get_airspace_state",
+        "get_disruptions",
+        "get_target_flight",
+        "get_sector_state",
+        "get_airport_state",
+        "get_weather_state",
+        "get_restrictions",
+        "get_network_metrics",
+    }
+
+
+def test_investigator_policy_snapshot_is_explicit():
+    investigator = GeminiInvestigator()
+
+    snapshot = (
+        investigator.policy_snapshot()
+    )
+
     assert (
-        "Sector S5"
-        in result.final_text
+        snapshot["stage"]
+        == "INVESTIGATION"
+    )
+
+    assert (
+        snapshot["max_total_calls"]
+        == 12
+    )
+
+    assert (
+        "apply_intervention"
+        in snapshot[
+            "permanently_blocked_tools"
+        ]
     )
 
 
-def test_unknown_model_requested_tool_is_contained():
+def test_blocked_tool_call_is_returned_as_structured_failure():
     fake_models = (
-        FakeModelsWithUnknownTool()
+        FakeModelsWithBlockedTool()
     )
 
-    fake_client = SimpleNamespace(
-        models=fake_models
+    fake_client = _build_fake_client(
+        fake_models
     )
 
     registry = (
@@ -191,35 +289,77 @@ def test_unknown_model_requested_tool_is_contained():
     client = GeminiClient(
         client=fake_client,
         model="test-model",
-        max_rounds=1,
     )
 
-    result = client.run(
-        prompt="Investigate.",
+    investigator = GeminiInvestigator(
         registry=registry,
-        system_instruction=(
-            "Use tools to investigate."
-        ),
+        gemini_client=client,
+    )
+
+    result = (
+        investigator.investigate()
     )
 
     assert (
-        result.status
-        == "DEGRADED"
+        len(result.tool_calls)
+        >= 1
+    )
+
+    blocked_call = (
+        result.tool_calls[0]
     )
 
     assert (
-        len(
-            result.tool_calls
-        )
-        == 1
+        blocked_call.name
+        == "generate_alternatives"
     )
 
     assert (
-        result.tool_calls[0].ok
+        blocked_call.ok
         is False
     )
 
     assert (
-        result.tool_calls[0].error_code
-        == "TOOL_NOT_FOUND"
+        blocked_call.error_code
+        == "TOOL_NOT_ALLOWED"
+    )
+
+
+def test_investigation_quality_detects_missing_evidence():
+    fake_models = FakeModels()
+
+    fake_client = _build_fake_client(
+        fake_models
+    )
+
+    registry = (
+        build_default_registry()
+    )
+
+    client = GeminiClient(
+        client=fake_client,
+        model="test-model",
+    )
+
+    investigator = GeminiInvestigator(
+        registry=registry,
+        gemini_client=client,
+    )
+
+    result = (
+        investigator.investigate()
+    )
+
+    assert (
+        result.quality.sufficient
+        is False
+    )
+
+    assert (
+        result.status
+        == "INSUFFICIENT_EVIDENCE"
+    )
+
+    assert (
+        result.quality.missing_checks
     )

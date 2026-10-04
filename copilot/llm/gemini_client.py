@@ -3,10 +3,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from copilot.tools import (
-    ToolRegistry,
-)
-
 
 class GeminiConfigurationError(
     RuntimeError
@@ -52,15 +48,11 @@ class GeminiClient:
     """
     Controlled Gemini function-calling client.
 
-    Responsibilities:
-    - create Gemini requests;
-    - expose registered function definitions;
-    - receive model-requested tool calls;
-    - execute them through ToolRegistry;
-    - return tool results to Gemini;
-    - enforce tool-call and round budgets.
+    The Gemini client itself has no aviation permissions.
+    Those are enforced by the registry supplied to `run()`.
 
-    It does NOT contain aviation-specific logic.
+    The application manually executes requested tools so that
+    AERIS can enforce policy, budgets, auditing and failure handling.
     """
 
     def __init__(
@@ -132,48 +124,20 @@ class GeminiClient:
             api_key=resolved_key
         )
 
-    def _build_tools(
-        self,
-        registry: ToolRegistry,
-    ) -> list[Any]:
+    @staticmethod
+    def _build_tool_declarations(
+        registry: Any,
+    ) -> list[dict[str, Any]]:
         """
-        Convert provider-neutral AERIS tool definitions
-        into Gemini SDK tool objects.
+        Use the provider-neutral declarations exposed by
+        the guarded registry.
+
+        Gemini accepts function declarations containing name,
+        description and JSON-schema-like parameters.
         """
-        try:
-            from google.genai import types
-        except ImportError as exc:
-            raise GeminiConfigurationError(
-                "google-genai is not installed."
-            ) from exc
-
-        declarations = []
-
-        for definition in (
+        return (
             registry.function_declarations()
-        ):
-            declarations.append(
-                types.FunctionDeclaration(
-                    name=definition[
-                        "name"
-                    ],
-                    description=definition[
-                        "description"
-                    ],
-                    parameters=definition[
-                        "parameters"
-                    ],
-                )
-            )
-
-        if not declarations:
-            return []
-
-        return [
-            types.Tool(
-                function_declarations=declarations
-            )
-        ]
+        )
 
     @staticmethod
     def _extract_content(
@@ -273,31 +237,29 @@ class GeminiClient:
         self,
         *,
         prompt: str,
-        registry: ToolRegistry,
+        registry: Any,
         system_instruction: str,
     ) -> GeminiRunResult:
         """
-        Execute a manual Gemini tool-calling loop.
+        Execute a controlled manual function-calling loop.
 
-        Automatic function calling is disabled intentionally.
-        AERIS executes every requested function through the
-        ToolRegistry so that calls are observable and controlled.
+        The supplied registry is expected to enforce AERIS policy.
         """
 
         try:
             from google.genai import types
-        except ImportError as exc:
+        except ImportError:
             return GeminiRunResult(
                 status="FAILED",
                 errors=[
-                    (
-                        "google-genai is not installed."
-                    )
+                    "google-genai is not installed."
                 ],
             )
 
-        tools = self._build_tools(
-            registry
+        tool_declarations = (
+            self._build_tool_declarations(
+                registry
+            )
         )
 
         contents: list[Any] = [
@@ -326,7 +288,13 @@ class GeminiClient:
             ):
                 config = (
                     types.GenerateContentConfig(
-                        tools=tools,
+                        tools=[
+                            {
+                                "function_declarations": (
+                                    tool_declarations
+                                )
+                            }
+                        ],
                         system_instruction=(
                             system_instruction
                         ),
@@ -361,23 +329,19 @@ class GeminiClient:
                 )
 
                 if not function_calls:
-                    final_text = (
-                        self._extract_text(
-                            response,
-                            content,
-                        )
-                    )
-
                     return GeminiRunResult(
                         status="COMPLETED",
-                        final_text=final_text,
+                        final_text=(
+                            self._extract_text(
+                                response,
+                                content,
+                            )
+                        ),
                         rounds=round_number,
                         tool_calls=tool_calls,
                         errors=errors,
                     )
 
-                # Preserve the model's function-call message
-                # before returning function results.
                 contents.append(
                     content
                 )
@@ -435,20 +399,18 @@ class GeminiClient:
                             tool_call
                         )
 
-                        error_payload = {
-                            "ok": False,
-                            "error_code": (
-                                "INVALID_TOOL_ARGUMENTS"
-                            ),
-                            "error_message": (
-                                str(exc)
-                            ),
-                        }
-
                         function_response_parts.append(
                             types.Part.from_function_response(
                                 name=call_name,
-                                response=error_payload,
+                                response={
+                                    "ok": False,
+                                    "error_code": (
+                                        "INVALID_TOOL_ARGUMENTS"
+                                    ),
+                                    "error_message": (
+                                        str(exc)
+                                    ),
+                                },
                             )
                         )
 
@@ -459,24 +421,11 @@ class GeminiClient:
                     ):
                         message = (
                             "Gemini exceeded the "
-                            "AERIS tool-call budget."
+                            "AERIS global tool-call budget."
                         )
 
                         errors.append(
                             message
-                        )
-
-                        function_response_parts.append(
-                            types.Part.from_function_response(
-                                name=call_name,
-                                response={
-                                    "ok": False,
-                                    "error_code": (
-                                        "TOOL_CALL_BUDGET_EXCEEDED"
-                                    ),
-                                    "error_message": message,
-                                },
-                            )
                         )
 
                         return GeminiRunResult(
@@ -559,9 +508,7 @@ class GeminiClient:
             return GeminiRunResult(
                 status="FAILED",
                 final_text="",
-                rounds=len(
-                    tool_calls
-                ),
+                rounds=len(tool_calls),
                 tool_calls=tool_calls,
                 errors=errors,
             )

@@ -9,23 +9,25 @@ class ToolNotFoundError(KeyError):
 
 class ToolRegistry:
     """
-    Central registry for AERIS tools.
+    Provider-neutral registry containing all available AERIS tools.
 
-    The orchestrator talks to this registry instead of directly
-    accessing engine implementations.
-
-    The registry is intentionally provider-neutral. Gemini-specific
-    translation happens at the LLM boundary.
+    Security-sensitive stage permissions are enforced by
+    GuardedToolRegistry, not by this base registry.
     """
 
     def __init__(
         self,
         tools: list[AerisTool] | None = None,
     ) -> None:
-        self._tools: dict[str, AerisTool] = {}
+        self._tools: dict[
+            str,
+            AerisTool,
+        ] = {}
 
         for tool in tools or []:
-            self.register(tool)
+            self.register(
+                tool
+            )
 
     def register(
         self,
@@ -41,14 +43,18 @@ class ToolRegistry:
                 f"Tool already registered: {tool.name}"
             )
 
-        self._tools[tool.name] = tool
+        self._tools[
+            tool.name
+        ] = tool
 
     def get(
         self,
         tool_name: str,
     ) -> AerisTool:
         try:
-            return self._tools[tool_name]
+            return self._tools[
+                tool_name
+            ]
         except KeyError as exc:
             raise ToolNotFoundError(
                 f"Unknown AERIS tool: {tool_name}"
@@ -64,31 +70,29 @@ class ToolRegistry:
     def definitions(
         self,
     ) -> list[dict[str, Any]]:
-        """
-        Return provider-neutral function definitions.
-        """
         return [
             tool.definition()
-            for tool in self._tools.values()
+            for tool
+            in self._tools.values()
         ]
 
     def function_declarations(
         self,
     ) -> list[dict[str, Any]]:
-        """
-        Return function declarations suitable for an
-        LLM provider adapter.
-
-        The declarations deliberately do not contain provider-specific
-        SDK classes.
-        """
         return [
             {
-                "name": definition["name"],
-                "description": definition["description"],
-                "parameters": definition["parameters"],
+                "name": definition[
+                    "name"
+                ],
+                "description": definition[
+                    "description"
+                ],
+                "parameters": definition[
+                    "parameters"
+                ],
             }
-            for definition in self.definitions()
+            for definition
+            in self.definitions()
         ]
 
     def invoke(
@@ -102,11 +106,14 @@ class ToolRegistry:
             tool = self.get(
                 tool_name
             )
+
         except ToolNotFoundError as exc:
             return ToolResult.failure(
                 tool_name=tool_name,
                 error_code="TOOL_NOT_FOUND",
-                error_message=str(exc),
+                error_message=str(
+                    exc
+                ),
             )
 
         try:
@@ -118,7 +125,9 @@ class ToolRegistry:
             return ToolResult.failure(
                 tool_name=tool_name,
                 error_code="INVALID_ARGUMENTS",
-                error_message=str(exc),
+                error_message=str(
+                    exc
+                ),
                 summary=(
                     "Tool arguments did not match "
                     "the expected interface."
@@ -129,5 +138,7 @@ class ToolRegistry:
             return ToolResult.failure(
                 tool_name=tool_name,
                 error_code="TOOL_EXECUTION_ERROR",
-                error_message=str(exc),
+                error_message=str(
+                    exc
+                ),
             )
