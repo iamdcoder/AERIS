@@ -1,5 +1,74 @@
 {
-  "status": "OBSERVING",
+  "scenario_id": "mumbai_weather_crisis",
+  "simulation_time_min": 17,
+  "mode": "DETERMINISTIC_MOCK",
   "target_flight_id": "F102",
-  "note": "Deterministic mock fixture for frontend/agent development."
+  "urgency": "HIGH",
+  "alerts": [
+    {
+      "type": "AIRPORT_CAPACITY_DEGRADATION",
+      "severity": "HIGH",
+      "summary": "F102 is degrading because BOM arrival capacity has fallen while holding demand is increasing."
+    },
+    {
+      "type": "SECTOR_CONGESTION",
+      "severity": "HIGH",
+      "summary": "Bypass sector S5 is approaching capacity as multiple flights begin shifting demand."
+    },
+    {
+      "type": "WEATHER_EXPANSION",
+      "severity": "HIGH",
+      "summary": "Convective weather is expanding toward the planned destination corridor."
+    }
+  ],
+  "target_flight": {
+    "id": "F102",
+    "callsign": "AER102",
+    "origin": "DEL",
+    "destination": "BOM",
+    "status": "DEGRADED",
+    "fuel_remaining_min": 108,
+    "reserve_required_min": 45,
+    "current_delay_min": 14,
+    "performance_class": "A320"
+  },
+  "airports": [
+    {
+      "id": "BOM",
+      "operational_status": "DEGRADED",
+      "arrival_capacity_per_15min": 18,
+      "normal_arrival_capacity_per_15min": 30
+    }
+  ],
+  "sectors": [
+    {
+      "id": "S4",
+      "status": "STRESSED",
+      "capacity": 12,
+      "projected_traffic": 11,
+      "projected_utilization": 0.92
+    },
+    {
+      "id": "S5",
+      "status": "STRESSED",
+      "capacity": 10,
+      "projected_traffic": 9,
+      "projected_utilization": 0.9
+    }
+  ],
+  "weather_cells": [
+    {
+      "id": "WX-BOM-01",
+      "type": "CONVECTIVE",
+      "severity": "SEVERE",
+      "uncertainty_pct": 20,
+      "forecast_expansion_pct": 20
+    }
+  ],
+  "network_summary": {
+    "active_aircraft": 48,
+    "aircraft_in_holding": 4,
+    "stressed_sectors": 2,
+    "network_delay_min": 31
+  }
 }
