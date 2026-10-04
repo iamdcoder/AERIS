@@ -1,4 +1,9 @@
-from .orchestrator import AgentOrchestrator
+from .gemini_runner import (
+    GeminiInvestigator,
+)
+from .orchestrator import (
+    AgentOrchestrator,
+)
 from .state import (
     AgentStage,
     AgentState,
@@ -7,6 +12,7 @@ from .state import (
 
 __all__ = [
     "AgentOrchestrator",
+    "GeminiInvestigator",
     "AgentStage",
     "AgentState",
     "RunStatus",

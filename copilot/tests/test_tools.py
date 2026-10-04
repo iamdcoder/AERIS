@@ -187,6 +187,41 @@ def test_tool_definitions_are_structured():
         )
 
 
+def test_function_declarations_are_provider_neutral():
+    registry = (
+        build_default_registry()
+    )
+
+    declarations = (
+        registry.function_declarations()
+    )
+
+    assert len(declarations) == 12
+
+    for declaration in declarations:
+        assert set(
+            declaration.keys()
+        ) == {
+            "name",
+            "description",
+            "parameters",
+        }
+
+        assert (
+            isinstance(
+                declaration["name"],
+                str,
+            )
+        )
+
+        assert (
+            declaration[
+                "parameters"
+            ]["type"]
+            == "object"
+        )
+
+
 def test_airspace_tool_returns_structured_result():
     registry = (
         build_default_registry()

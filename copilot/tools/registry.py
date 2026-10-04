@@ -11,8 +11,11 @@ class ToolRegistry:
     """
     Central registry for AERIS tools.
 
-    The orchestrator talks to the registry instead of directly
-    talking to engine implementations.
+    The orchestrator talks to this registry instead of directly
+    accessing engine implementations.
+
+    The registry is intentionally provider-neutral. Gemini-specific
+    translation happens at the LLM boundary.
     """
 
     def __init__(
@@ -61,9 +64,31 @@ class ToolRegistry:
     def definitions(
         self,
     ) -> list[dict[str, Any]]:
+        """
+        Return provider-neutral function definitions.
+        """
         return [
             tool.definition()
             for tool in self._tools.values()
+        ]
+
+    def function_declarations(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Return function declarations suitable for an
+        LLM provider adapter.
+
+        The declarations deliberately do not contain provider-specific
+        SDK classes.
+        """
+        return [
+            {
+                "name": definition["name"],
+                "description": definition["description"],
+                "parameters": definition["parameters"],
+            }
+            for definition in self.definitions()
         ]
 
     def invoke(
@@ -88,6 +113,7 @@ class ToolRegistry:
             return tool.execute(
                 **arguments
             )
+
         except TypeError as exc:
             return ToolResult.failure(
                 tool_name=tool_name,
@@ -98,6 +124,7 @@ class ToolRegistry:
                     "the expected interface."
                 ),
             )
+
         except Exception as exc:
             return ToolResult.failure(
                 tool_name=tool_name,

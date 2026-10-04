@@ -4,6 +4,9 @@ from copilot.agent.planner import (
     NoFeasibleCandidateError,
     select_initial_leader,
 )
+from copilot.llm import (
+    GeminiConfigurationError,
+)
 from copilot.tools import (
     ToolRegistry,
     build_default_registry,
@@ -122,3 +125,14 @@ def test_tool_failure_is_structured():
     )
 
     assert result.error_message
+
+
+def test_gemini_requires_configuration_when_no_client_is_injected():
+    with pytest.raises(
+        GeminiConfigurationError
+    ):
+        from copilot.llm import GeminiClient
+
+        GeminiClient(
+            api_key=""
+        )
