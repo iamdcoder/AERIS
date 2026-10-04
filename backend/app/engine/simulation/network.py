@@ -1,26 +1,32 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 from ..constraints.conflict import conflict_check
 from ..constraints.weather import weather_intersection
 from ..routes.graph import route_distance_km
 from ..digital_twin.simulator import DigitalTwinSimulator
+from ..digital_twin.state import WorldState
+from ...models.aircraft import Aircraft
 from .transitions import apply_candidate_to_flight
 
 
-def _network_snapshot(state) -> dict:
+SIM_TIME_SCALE = 1.5
+_WEATHER_SEVERITY_FACTOR = {"HIGH": 1.0, "SEVERE": 1.5}
+_KM_PER_COORDINATE_DEGREE = 111.0
+
+
+def _network_snapshot(state: WorldState) -> dict[str, float | int]:
     return {
-        "total_delay_min": round(sum(f.delay_min for f in state.aircraft.values()), 2),
+        "total_delay_min": sum(f.delay_min for f in state.aircraft.values()),
         "airborne": sum(1 for f in state.aircraft.values() if f.status == "AIRBORNE"),
         "degraded": sum(1 for f in state.aircraft.values() if f.status == "DEGRADED"),
-        "max_sector_utilization_pct": round(
-            max((s.utilization_pct for s in state.sectors.values()), default=0.0), 1
-        ),
     }
 
 
-def _sector_profile(state, route: list[str]) -> dict[str, int]:
+def _sector_profile(state: WorldState, route: list[str]) -> dict[str, int]:
+    """Count route nodes per sector using the twin's first-matching-sector rule."""
     profile = {sid: 0 for sid in state.sectors}
     for node in route:
         for sid, sector in state.sectors.items():
@@ -30,117 +36,194 @@ def _sector_profile(state, route: list[str]) -> dict[str, int]:
     return {sid: count for sid, count in profile.items() if count}
 
 
-def _ripple_detail(state, target, candidate_route: list[str]) -> tuple[float, dict]:
-    baseline = _sector_profile(state, target.original_route or target.route)
-    candidate = _sector_profile(state, candidate_route)
-    delta = {sid: candidate.get(sid, 0) - baseline.get(sid, 0) for sid in state.sectors}
-
-    ripple = 0.0
-    detail: dict = {}
-    for sid, d in delta.items():
-        if d == 0:
+def _flights_in_sector(state: WorldState, sector_id: str) -> list[Aircraft]:
+    """Return sector occupants in flight-ID order, matching twin occupancy rules."""
+    flights: list[Aircraft] = []
+    for flight in state.aircraft.values():
+        if flight.status in {"LANDED", "CANCELLED"}:
             continue
-        sector = state.sectors[sid]
-        pressure = max(sector.forecast_traffic, sector.current_traffic) / max(1, sector.capacity)
-        if d > 0:
-            contribution = d * pressure * 2.5
-            ripple += contribution
-            detail[sid] = {"delta_nodes": d, "pressure": round(pressure, 2), "ripple_min": round(contribution, 2)}
-        else:
-            contribution = d * pressure * 4.0
-            ripple += contribution
-            detail[sid] = {"delta_nodes": d, "pressure": round(pressure, 2), "relief_min": round(contribution, 2)}
-
-    wx = weather_intersection(state, candidate_route)
-    if wx["intersects"] and wx["severity"] in {"HIGH", "SEVERE"}:
-        ripple += 5.0
-        detail["WEATHER"] = {"severity": wx["severity"], "penalty_min": 5.0}
-
-    return ripple, detail
-
-
-def _apply_background_ripple(state, target_id: str, detail: dict, ripple: float) -> int:
-    impact_sectors = [sid for sid in detail if sid != "WEATHER"]
-    if "WEATHER" in detail:
-        impact_sectors.extend(["S3", "S5"])
-    impact_nodes = set()
-    for sid in impact_sectors:
-        if sid in state.sectors:
-            impact_nodes.update(state.sectors[sid].nodes)
-
-    affected = []
-    for flight in sorted(state.aircraft.values(), key=lambda f: f.id):
-        if flight.id == target_id or flight.status != "AIRBORNE":
+        if not flight.route or flight.route_index >= len(flight.route):
             continue
-        if impact_nodes.intersection(flight.route):
-            affected.append(flight)
+        current_node = flight.route[flight.route_index]
+        for matching_id, sector in state.sectors.items():
+            if current_node in sector.nodes:
+                if matching_id == sector_id:
+                    flights.append(flight)
+                break
+    return sorted(flights, key=lambda flight: flight.id)
 
-    count = min(len(affected), 4)
-    if count == 0 or ripple == 0:
-        return 0
-    per_flight = max(0.5, min(1.5, abs(ripple) / count))
-    for flight in affected[:count]:
-        if ripple > 0:
-            flight.delay_min += per_flight
-        else:
-            flight.delay_min = max(0.0, flight.delay_min - per_flight)
-    return count
+
+def _sector_utilization(state: WorldState, sector_id: str) -> float:
+    sector = state.sectors[sector_id]
+    return round(sector.current_traffic / max(1, sector.capacity) * 100.0, 1)
+
+
+def _advance_network(simulator: DigitalTwinSimulator, horizon_min: int) -> dict[str, Any]:
+    """Advance the twin minute-by-minute and add deterministic overload delay.
+
+    Each flight receives at most one congestion increment per sector-occupancy
+    event (one simulated minute). An overload of n aircraft above capacity adds
+    1 + 0.5 * (n - 1) minutes to each airborne occupant; increments never go
+    below zero and are added to, rather than substituted for, existing delay.
+    """
+    state = simulator.state
+    peak_utilization = {sid: _sector_utilization(state, sid) for sid in state.sectors}
+    peak_overloaded: set[str] = set()
+    affected_flight_ids: set[str] = set()
+    congestion_delay_by_sector = {sid: 0.0 for sid in state.sectors}
+
+    for sid, sector in state.sectors.items():
+        if sector.current_traffic > sector.capacity:
+            peak_overloaded.add(sid)
+
+    for _ in range(max(0, horizon_min)):
+        simulator.tick()
+        overloaded: list[tuple[str, int]] = []
+        for sid, sector in sorted(state.sectors.items()):
+            utilization = _sector_utilization(state, sid)
+            sector.utilization_pct = utilization
+            peak_utilization[sid] = max(peak_utilization.get(sid, 0.0), utilization)
+            if sector.current_traffic > sector.capacity:
+                overload = sector.current_traffic - sector.capacity
+                overloaded.append((sid, overload))
+                peak_overloaded.add(sid)
+
+        applied_flight_ids: set[str] = set()
+        for sid, overload in overloaded:
+            delay = max(0.0, 1.0 + 0.5 * (overload - 1))
+            for flight in _flights_in_sector(state, sid):
+                if flight.id in applied_flight_ids:
+                    continue
+                flight.delay_min += delay
+                applied_flight_ids.add(flight.id)
+                affected_flight_ids.add(flight.id)
+                congestion_delay_by_sector[sid] += delay
+
+    return {
+        "peak_sector_utilization_pct": {
+            sid: round(peak_utilization[sid], 1) for sid in sorted(peak_utilization)
+        },
+        "peak_overloaded_sectors": sorted(peak_overloaded),
+        "affected_flight_ids": sorted(affected_flight_ids),
+        "affected_flights_count": len(affected_flight_ids),
+        "congestion_delay_by_sector": {
+            sid: round(delay, 2)
+            for sid, delay in sorted(congestion_delay_by_sector.items())
+        },
+    }
+
+
+def _route_travel_time_min(graph, route: list[str], speed_kt: float) -> float:
+    speed_km_min = max(1.0, speed_kt * 1.852 / 60.0)
+    return route_distance_km(graph, route) / speed_km_min * SIM_TIME_SCALE
+
+
+def _weather_delay_min(state: WorldState, route: list[str], speed_kt: float) -> tuple[float, dict[str, Any]]:
+    exposure = weather_intersection(state, route)
+    severity = exposure["severity"]
+    severity_factor = _WEATHER_SEVERITY_FACTOR.get(severity, 0.0)
+    if not exposure["intersects"] or severity_factor == 0.0:
+        return 0.0, {"severity": severity, "intersection_length": 0.0, "delay_min": 0.0}
+
+    intersection_length = sum(float(item["intersection_length"]) for item in exposure["affected_segments"])
+    exposure_distance_km = intersection_length * _KM_PER_COORDINATE_DEGREE
+    speed_km_min = max(1.0, speed_kt * 1.852 / 60.0)
+    delay_min = exposure_distance_km / speed_km_min * SIM_TIME_SCALE * severity_factor
+    return delay_min, {
+        "severity": severity,
+        "intersection_length": round(intersection_length, 4),
+        "delay_min": round(delay_min, 2),
+    }
 
 
 def simulate_candidate(state, candidate: dict, horizon_min: int = 20) -> dict:
-    baseline_state = deepcopy(state)
-    baseline_sim = DigitalTwinSimulator(baseline_state)
-    baseline_sim.advance(horizon_min)
+    # Create both worlds before advancing either one: neither simulation can
+    # inherit mutations, event effects, or congestion delay from the other.
+    baseline_sim = DigitalTwinSimulator(deepcopy(state))
+    candidate_sim = DigitalTwinSimulator(deepcopy(state))
+    baseline_state = baseline_sim.state
+    candidate_state = candidate_sim.state
+    target_id = candidate["flight_id"]
+    baseline_network = _advance_network(baseline_sim, horizon_min)
     before = _network_snapshot(baseline_state)
-    baseline_target_delay = baseline_state.aircraft[candidate["flight_id"]].delay_min
+    baseline_target_delay = baseline_state.aircraft[target_id].delay_min
 
-    sim_state = deepcopy(state)
-    sim = DigitalTwinSimulator(sim_state)
-    target = sim_state.aircraft[candidate["flight_id"]]
-    original_distance = route_distance_km(state.graph, target.route[target.route_index :])
-    candidate_distance = route_distance_km(state.graph, candidate["route"])
-    extra_distance = max(0.0, candidate_distance - original_distance)
-    speed_km_min = max(1.0, target.speed_kt * 1.852 / 60.0)
-    target.delay_min += extra_distance / speed_km_min * 1.5
+    target = candidate_state.aircraft[target_id]
+    baseline_route = target.route[target.route_index :]
+    baseline_speed = target.speed_kt
+    candidate_speed = float(candidate.get("speed_kt", baseline_speed))
+    baseline_route_time = _route_travel_time_min(candidate_state.graph, baseline_route, baseline_speed)
+    candidate_route_time = _route_travel_time_min(candidate_state.graph, candidate["route"], candidate_speed)
+    target.delay_min += candidate_route_time - baseline_route_time
+    weather_delay, weather_detail = _weather_delay_min(candidate_state, candidate["route"], candidate_speed)
+    target.delay_min += weather_delay
     apply_candidate_to_flight(target, candidate)
+    candidate_network = _advance_network(candidate_sim, horizon_min)
+    after = _network_snapshot(candidate_state)
 
-    ripple, ripple_detail = _ripple_detail(state, target, candidate["route"])
-    affected = _apply_background_ripple(sim_state, target.id, ripple_detail, ripple)
-    sim.advance(horizon_min)
-    after = _network_snapshot(sim_state)
+    baseline_total_delay = round(float(before["total_delay_min"]), 2)
+    candidate_total_delay = round(float(after["total_delay_min"]), 2)
+    network_delta = round(candidate_total_delay - baseline_total_delay, 2)
+    candidate_target_delay = candidate_state.aircraft[target_id].delay_min
+    baseline_target_delay = round(baseline_target_delay, 2)
+    candidate_target_delay = round(candidate_target_delay, 2)
+    target_delta = round(candidate_target_delay - baseline_target_delay, 2)
+    affected_ids = sorted(
+        flight_id
+        for flight_id in candidate_state.aircraft
+        if flight_id != target_id
+        and candidate_state.aircraft[flight_id].delay_min - baseline_state.aircraft[flight_id].delay_min > 0.5
+    )
+    sector_util = candidate_network["peak_sector_utilization_pct"]
+    max_sector_utilization = max(sector_util.values(), default=0.0)
 
-    target_delta = sim_state.aircraft[candidate["flight_id"]].delay_min - baseline_target_delay
-    network_delta = after["total_delay_min"] - before["total_delay_min"]
+    sector_ripple_detail: dict[str, dict[str, float]] = {}
+    baseline_peaks = baseline_network["peak_sector_utilization_pct"]
+    candidate_delays = candidate_network["congestion_delay_by_sector"]
+    for sid in sorted(set(baseline_peaks) | set(sector_util)):
+        if baseline_peaks.get(sid, 0.0) != sector_util.get(sid, 0.0) or candidate_delays.get(sid, 0.0):
+            sector_ripple_detail[sid] = {
+                "baseline_peak_utilization_pct": round(baseline_peaks.get(sid, 0.0), 1),
+                "peak_utilization_pct": round(sector_util.get(sid, 0.0), 1),
+                "congestion_delay_min": round(candidate_delays.get(sid, 0.0), 2),
+            }
+
     conflict_result = conflict_check(
-        sim_state,
-        candidate["flight_id"],
+        candidate_state,
+        target_id,
         candidate["route"],
         float(candidate.get("speed_kt", target.speed_kt)),
     )
-    sector_util = {sid: round(s.utilization_pct, 1) for sid, s in sim_state.sectors.items()}
 
     return {
         "candidate_id": candidate["candidate_id"],
-        "target_delay_delta_min": round(target_delta, 2),
+        "target_delay_delta_min": target_delta,
+        "baseline_target_delay_min": round(baseline_target_delay, 2),
+        "candidate_target_delay_min": round(candidate_target_delay, 2),
         "fuel_effect_min": round(
             state.aircraft[candidate["flight_id"]].fuel_remaining_min
-            - sim_state.aircraft[candidate["flight_id"]].fuel_remaining_min,
+            - candidate_state.aircraft[candidate["flight_id"]].fuel_remaining_min,
             2,
         ),
-        "affected_flights": affected,
-        "network_delay_delta_min": round(network_delta, 2),
+        "affected_flights": len(affected_ids),
+        "network_delay_delta_min": network_delta,
         "sector_utilization": sector_util,
         "conflict_impact": {
             "new_conflicts": len(conflict_result["conflicts"]),
             "details": conflict_result["conflicts"][:5],
         },
         "cascade_indicators": {
-            "delay_delta": round(network_delta, 2),
-            "affected_flights": affected,
+            "delay_delta": network_delta,
+            "affected_flights": len(affected_ids),
+            "affected_flight_ids": affected_ids,
             "degraded_flights_after": after["degraded"],
-            "max_sector_utilization_pct": after["max_sector_utilization_pct"],
-            "sector_ripple_detail": ripple_detail,
+            "max_sector_utilization_pct": round(max_sector_utilization, 1),
+            "peak_overloaded_sectors": candidate_network["peak_overloaded_sectors"],
+            "sector_ripple_detail": sector_ripple_detail,
+            "congestion_affected_flight_ids": candidate_network["affected_flight_ids"],
+            "baseline_congestion_affected_flight_ids": baseline_network["affected_flight_ids"],
+            "weather_exposure": weather_detail,
         },
-        "baseline_total_delay_min": before["total_delay_min"],
-        "candidate_total_delay_min": after["total_delay_min"],
+        "baseline_total_delay_min": baseline_total_delay,
+        "candidate_total_delay_min": candidate_total_delay,
     }
