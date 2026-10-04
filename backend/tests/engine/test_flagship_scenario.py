@@ -1,0 +1,185 @@
+from __future__ import annotations
+
+from copy import deepcopy
+
+import pytest
+
+from app.engine import public
+from app.engine.digital_twin.loaders import load_scenario, load_world
+from app.engine.digital_twin.simulator import DigitalTwinSimulator
+from app.engine.stress_test.runner import run_stress_test
+
+
+@pytest.fixture(autouse=True)
+def reset_public_engine():
+    public.reset_engine()
+    yield
+    public.reset_engine()
+
+
+def _score_at_decision_time() -> list[dict]:
+    public.reset_engine()
+    public.advance_simulation(19)
+    candidates = public.generate_alternatives("F102")
+    return public.score_candidates(candidates)
+
+
+def test_flagship_timeline_and_disruptions_are_deterministic_through_t35():
+    scenario = load_scenario()
+    assert scenario["target_flight_id"] == "F102"
+    assert scenario["simulation_minutes"] == 35
+
+    simulator = DigitalTwinSimulator(load_world())
+    state = simulator.state
+    assert state.time_min == 0
+    assert state.aircraft["F102"].status == "AIRBORNE"
+    assert state.weather_cells["WX-BOM-01"].intensity == "MODERATE"
+
+    simulator.advance(5)
+    assert state.time_min == 5
+    assert state.weather_cells["WX-BOM-01"].intensity == "HIGH"
+
+    simulator.advance(3)
+    assert state.airports["BOM"].arrival_capacity == 12
+
+    simulator.advance(2)
+    assert state.holding_flights == {"AI2-01", "AI3-01", "AI5-01", "AI8-01"}
+
+    simulator.advance(2)
+    assert state.sectors["S6"].capacity == 6
+
+    simulator.advance(3)
+    assert state.aircraft["F102"].status == "DEGRADED"
+    assert 0 < state.aircraft["F102"].fuel_remaining_min <= 51
+
+    simulator.advance(3)
+    assert state.restrictions["R-MONSOON-01"].active is True
+
+    simulator.advance(17)
+    assert state.time_min == 35
+
+
+def test_scenario_loads_and_stress_testing_do_not_mutate_source_world():
+    source_scenario = load_scenario()
+    state = load_world()
+    state_snapshot = state.snapshot()
+    scenario_snapshot = deepcopy(state.scenario)
+
+    state.scenario["events"][0]["t"] = -1
+    assert load_scenario() == source_scenario
+    state.scenario = deepcopy(scenario_snapshot)
+
+    simulator = DigitalTwinSimulator(state)
+    simulator.advance(19)
+    state_snapshot = state.snapshot()
+    scenario_snapshot = deepcopy(state.scenario)
+    candidate = next(
+        item for item in public.generate_alternatives("F102")
+        if item["candidate_id"] == "ALT-D"
+    )
+
+    first = run_stress_test(state, candidate)
+    second = run_stress_test(state, candidate)
+
+    assert first == second
+    assert state.snapshot() == state_snapshot
+    assert state.scenario == scenario_snapshot
+
+
+def test_flagship_candidate_validation_contract_and_route_diversity():
+    public.advance_simulation(19)
+    candidates = public.generate_alternatives("F102")
+    assert [item["candidate_id"] for item in candidates] == ["ALT-A", "ALT-B", "ALT-C", "ALT-D", "ALT-E"]
+    assert len({tuple(item["route"]) for item in candidates}) == 5
+    assert all(item["flight_id"] == "F102" for item in candidates)
+
+    validations = {
+        item["candidate_id"]: public.validate_candidate(item)
+        for item in candidates
+    }
+    assert validations["ALT-C"]["feasible"] is False
+    assert validations["ALT-C"]["constraint_results"]["restriction"]["passed"] is False
+    assert any("restriction" in reason.lower() or "temporary" in reason.lower()
+               for reason in validations["ALT-C"]["rejection_reasons"])
+
+    assert validations["ALT-E"]["feasible"] is False
+    assert validations["ALT-E"]["constraint_results"]["fuel"]["feasible"] is False
+    assert any("fuel" in reason.lower() or "reserve" in reason.lower()
+               for reason in validations["ALT-E"]["rejection_reasons"])
+
+    assert validations["ALT-A"]["feasible"] is True
+    assert validations["ALT-B"]["feasible"] is True
+    assert validations["ALT-D"]["feasible"] is True
+
+
+def test_flagship_stress_profiles_are_five_deterministic_and_numerically_distinct():
+    scored = _score_at_decision_time()
+    by_id = {item["candidate_id"]: item for item in scored}
+    assert len(by_id) == 5
+
+    feasible_ids = {candidate_id for candidate_id, item in by_id.items() if item["feasible"]}
+    assert feasible_ids == {"ALT-A", "ALT-B", "ALT-D"}
+    assert [item["scenario_id"] for item in by_id["ALT-D"]["stress_report"]["results"]] == [
+        "F1", "F2", "F3", "F4", "F5"
+    ]
+
+    for candidate_id in feasible_ids:
+        candidate = next(item for item in public._CANDIDATES.values()
+                         if item.get("candidate_id") == candidate_id)
+        stress = public.stress_test_candidate(candidate)
+        assert len(stress["results"]) == 5
+        assert stress == public.stress_test_candidate(candidate)
+
+    candidate_stress_deltas = {
+        candidate_id: by_id[candidate_id]["stress_report"]["results"][0]["network_delay_delta_min"]
+        for candidate_id in feasible_ids
+    }
+    assert len(set(candidate_stress_deltas.values())) > 1
+
+    for candidate_id in feasible_ids:
+        candidate = by_id[candidate_id]
+        assert "target_flight_benefit" in candidate["network_metrics"]
+        assert "network_ripple_cost" in candidate["network_metrics"]
+        assert "future_robustness" in candidate["resilience_metrics"]
+        assert "reintervention_probability" in candidate["resilience_metrics"]
+        assert "regret" in candidate["resilience_metrics"]
+
+
+def test_repeated_clean_flagship_runs_return_identical_candidate_metrics():
+    first = _score_at_decision_time()
+    second = _score_at_decision_time()
+    assert first == second
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "At T+19 F102 is at W3, but the hard-coded flagship candidates all start at W0; "
+        "simulation therefore compares different starting positions and cannot establish "
+        "the documented local-vs-network candidate story without engine/candidate integration work."
+    ),
+)
+def test_candidates_begin_at_f102_decision_position():
+    public.advance_simulation(19)
+    target = public._engine().state.aircraft["F102"]
+    decision_node = target.route[target.route_index]
+    candidates = public.generate_alternatives("F102")
+
+    assert all(candidate["route"][0] == decision_node for candidate in candidates)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Current scoring reports all feasible alternatives at 5/5 stress survival; "
+        "ALT-A scores above ALT-D because the time-stepped runs produce no candidate-specific "
+        "affected-flight/network ripple. Do not force a winner with fixture numbers."
+    ),
+)
+def test_alt_d_has_strongest_resilience_and_wins_engine_score():
+    scored = _score_at_decision_time()
+    by_id = {item["candidate_id"]: item for item in scored}
+
+    assert by_id["ALT-D"]["resilience_metrics"]["future_robustness"] > by_id["ALT-A"]["resilience_metrics"]["future_robustness"]
+    assert by_id["ALT-D"]["decision_score"] > by_id["ALT-A"]["decision_score"]
+    assert scored[0]["candidate_id"] == "ALT-D"

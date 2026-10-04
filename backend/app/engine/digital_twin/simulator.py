@@ -78,7 +78,11 @@ class DigitalTwinSimulator:
             self.state.restrictions[rid].active = True
 
         elif name == "dispatcher_approval":
-            self.state.approved_intervention = None
+            # Only clear the approval marker when no real intervention has been
+            # applied yet (via public.apply_intervention).  If apply has already
+            # set approved_intervention, leave it intact so verify_state works.
+            if self.state.approved_intervention is None:
+                self.state.approved_intervention = None  # no-op; kept for clarity
 
     def _events_at(self, t: int) -> list[dict[str, Any]]:
         return [e for e in self.state.scenario.get("events", []) if int(e.get("t", -1)) == t]
