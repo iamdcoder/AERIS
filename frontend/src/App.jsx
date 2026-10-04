@@ -1,4 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import AirspaceMap from "./components/AirspaceMap";
 import DisruptionAlert from "./components/DisruptionAlert";
@@ -11,27 +15,62 @@ import VerificationPanel from "./components/VerificationPanel";
 import FlightDetail from "./components/FlightDetail";
 import Timeline from "./components/Timeline";
 
-import { DEMO_DASHBOARD, DEMO_TIMELINE } from "./lib/demoData";
-import { applyIntervention, verifyIntervention } from "./lib/api";
+import {
+  approveCopilotRun,
+  fetchBaseline,
+  rejectCopilotRun,
+  resetCopilot,
+  runCopilotRecommendation,
+} from "./lib/api";
 
-const INVESTIGATION_STAGES = [
-  "OBSERVE",
-  "DIAGNOSE",
-  "PLAN",
-  "EVALUATE",
-  "STRESS TEST",
-  "CRITIC",
-  "RECOMMEND",
-];
+import {
+  getRecommendedCandidate,
+  normalizeAgentState,
+  normalizeBaseline,
+} from "./lib/dashboardAdapter";
 
-function Header({ mode, phase, onRun }) {
+
+const EMPTY_CANDIDATE = {
+  id: "—",
+  feasible: false,
+  localScore: null,
+  decisionScore: null,
+  targetDelayMin: 0,
+  networkDelayDeltaMin: 0,
+  peakSectorUtilization: 0,
+  resilience: 0,
+  stressSurvival: 0,
+  stressTotal: 0,
+  affectedFlights: 0,
+  fuelMarginKg: null,
+  fuelMarginMin: null,
+  extraDistanceKm: 0,
+  label: "Awaiting AERIS investigation",
+  interventionType: "NONE",
+  summary:
+    "Run AERIS to investigate the current airspace state.",
+  rejectionReason: null,
+};
+
+
+function Header({
+  mode,
+  phase,
+  onRun,
+  disabled,
+}) {
   return (
     <header className="topbar">
       <div className="brand">
-        <div className="brand-mark">A</div>
+        <div className="brand-mark">
+          A
+        </div>
 
         <div>
-          <strong>AERIS</strong>
+          <strong>
+            AERIS
+          </strong>
+
           <span>
             Agentic Airspace Resilience Intelligence System
           </span>
@@ -57,12 +96,13 @@ function Header({ mode, phase, onRun }) {
         <button
           type="button"
           className="run-button"
+          disabled={disabled}
           onClick={onRun}
         >
           {phase === "RUNNING"
             ? "AERIS RUNNING..."
             : phase === "COMPLETE"
-              ? "RERUN INVESTIGATION"
+              ? "RERUN AERIS"
               : "RUN AERIS"}
         </button>
       </div>
@@ -70,399 +110,771 @@ function Header({ mode, phase, onRun }) {
   );
 }
 
+
 function RecommendationBanner({
   candidate,
   recommendation,
   approvalStatus,
 }) {
+  const hasRecommendation =
+    Boolean(
+      recommendation &&
+        recommendation.candidateId,
+    );
+
   return (
     <section className="recommendation-banner">
       <div className="recommendation-main">
         <div className="recommendation-kicker">
           <span />
-          AERIS RECOMMENDATION
+          {hasRecommendation
+            ? "AERIS RECOMMENDATION"
+            : "AERIS COMMAND CENTER"}
         </div>
 
         <div className="recommendation-title-row">
-          <h1>{candidate.id}</h1>
-          <span>{candidate.label}</span>
+          <h1>
+            {candidate.id}
+          </h1>
+
+          <span>
+            {candidate.label}
+          </span>
         </div>
 
-        <p>{recommendation.summary}</p>
+        <p>
+          {hasRecommendation
+            ? recommendation.summary
+            : "No recommendation has been produced yet. Run the investigation to activate the decision pipeline."}
+        </p>
       </div>
 
       <div className="recommendation-stats">
         <div>
-          <span>Decision score</span>
-          <strong>{recommendation.decisionScore.toFixed(2)}</strong>
-        </div>
+          <span>
+            Decision score
+          </span>
 
-        <div>
-          <span>Resilience</span>
-          <strong>{candidate.resilience.toFixed(2)}</strong>
-        </div>
-
-        <div>
-          <span>Stress</span>
           <strong>
-            {candidate.stressSurvival}/{candidate.stressTotal}
+            {candidate.decisionScore ===
+            null
+              ? "—"
+              : Number(
+                    candidate.decisionScore,
+                  ).toFixed(2)}
           </strong>
         </div>
 
         <div>
-          <span>Approval</span>
-          <strong>{approvalStatus}</strong>
+          <span>
+            Resilience
+          </span>
+
+          <strong>
+            {candidate.resilience.toFixed(
+              2,
+            )}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            Stress
+          </span>
+
+          <strong>
+            {candidate.stressTotal
+              ? `${candidate.stressSurvival}/${candidate.stressTotal}`
+              : "—"}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            Approval
+          </span>
+
+          <strong>
+            {hasRecommendation
+              ? approvalStatus
+              : "NOT RUN"}
+          </strong>
         </div>
       </div>
     </section>
   );
 }
 
-function App() {
-  const [dashboard] = useState(DEMO_DASHBOARD);
 
-  const [selectedCandidateId, setSelectedCandidateId] =
-    useState(dashboard.recommendation.candidateId);
+function LoadingScreen() {
+  return (
+    <div className="loading-screen">
+      <div className="loading-mark">
+        A
+      </div>
 
-  const [phase, setPhase] = useState("IDLE");
-  const [stageIndex, setStageIndex] = useState(-1);
+      <strong>
+        INITIALIZING AERIS
+      </strong>
 
-  const [approvalStatus, setApprovalStatus] =
-    useState("PENDING");
-
-  const [executionStatus, setExecutionStatus] =
-    useState("LOCKED");
-
-  const [verificationStatus, setVerificationStatus] =
-    useState("PENDING");
-
-  const [executionMode, setExecutionMode] =
-    useState("SIMULATION_FALLBACK");
-
-  const [rejectedCandidate, setRejectedCandidate] =
-    useState(null);
-
-  const timerRef = useRef(null);
-
-  const availableCandidates = useMemo(
-    () =>
-      dashboard.candidates.filter(
-        (candidate) => !candidate.rejected
-      ),
-    [dashboard.candidates]
+      <span>
+        Loading deterministic airspace state...
+      </span>
+    </div>
   );
+}
 
-  const selectedCandidate =
-    availableCandidates.find(
-      (candidate) => candidate.id === selectedCandidateId
-    ) || dashboard.candidates.find(
-      (candidate) => candidate.id === dashboard.recommendation.candidateId
-    );
+
+function ErrorBanner({
+  message,
+  onRetry,
+}) {
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <section className="error-banner">
+      <div>
+        <strong>
+          AERIS BACKEND ERROR
+        </strong>
+
+        <span>
+          {message}
+        </span>
+      </div>
+
+      <button
+        type="button"
+        onClick={onRetry}
+      >
+        RETRY
+      </button>
+    </section>
+  );
+}
+
+
+function App() {
+  const [
+    dashboard,
+    setDashboard,
+  ] = useState(null);
+
+  const [
+    agentState,
+    setAgentState,
+  ] = useState(null);
+
+  const [
+    selectedCandidateId,
+    setSelectedCandidateId,
+  ] = useState(null);
+
+  const [
+    busy,
+    setBusy,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
 
   useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-      }
-    };
+    loadBaseline();
   }, []);
 
-  function stopRun() {
-    if (timerRef.current) {
-      window.clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  }
+  async function loadBaseline() {
+    setError("");
 
-  function startInvestigation() {
-    stopRun();
+    const result =
+      await fetchBaseline(
+        "F102",
+      );
 
-    setPhase("RUNNING");
-    setStageIndex(0);
-    setApprovalStatus("PENDING");
-    setExecutionStatus("LOCKED");
-    setVerificationStatus("PENDING");
-    setExecutionMode("SIMULATION_FALLBACK");
-    setRejectedCandidate(null);
-    setSelectedCandidateId(
-      dashboard.recommendation.candidateId
-    );
-
-    let currentIndex = 0;
-
-    timerRef.current = window.setInterval(() => {
-      currentIndex += 1;
-
-      if (currentIndex >= INVESTIGATION_STAGES.length) {
-        stopRun();
-        setStageIndex(INVESTIGATION_STAGES.length - 1);
-        setPhase("COMPLETE");
-        return;
-      }
-
-      setStageIndex(currentIndex);
-    }, 650);
-  }
-
-  function handleCandidateSelect(candidateId) {
-    const candidate = dashboard.candidates.find(
-      (item) => item.id === candidateId
-    );
-
-    if (!candidate || !candidate.feasible) {
+    if (!result.ok) {
+      setError(
+        result.error,
+      );
       return;
     }
 
-    setSelectedCandidateId(candidateId);
+    const baseline =
+      normalizeBaseline(
+        result.data,
+      );
 
-    if (phase === "COMPLETE") {
-      setApprovalStatus("PENDING");
-      setExecutionStatus("LOCKED");
-      setVerificationStatus("PENDING");
-    }
+    setDashboard(
+      baseline,
+    );
+
+    setAgentState(
+      null,
+    );
+
+    setSelectedCandidateId(
+      null,
+    );
   }
+
+
+  async function runAeris() {
+    if (busy) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
+    const reset =
+      await resetCopilot();
+
+    if (!reset.ok) {
+      setBusy(false);
+      setError(
+        reset.error ||
+          "Unable to reset the AERIS simulation.",
+      );
+      return;
+    }
+
+    const runId =
+      `WEB-${Date.now()}`;
+
+    const result =
+      await runCopilotRecommendation(
+        {
+          target_flight_id:
+            "F102",
+
+          scenario_id:
+            "mumbai_weather_crisis",
+
+          run_id:
+            runId,
+        },
+      );
+
+    setBusy(false);
+
+    if (!result.ok) {
+      setError(
+        result.error ||
+          "AERIS recommendation failed.",
+      );
+      return;
+    }
+
+    const state =
+      result.data;
+
+    setAgentState(
+      state,
+    );
+
+    const normalized =
+      normalizeAgentState(
+        state,
+      );
+
+    setDashboard(
+      normalized,
+    );
+
+    setSelectedCandidateId(
+      normalized.recommendation
+        ?.candidateId ||
+        null,
+    );
+  }
+
 
   async function handleApprove() {
-    if (!selectedCandidate || !selectedCandidate.feasible) {
+    if (
+      !agentState ||
+      busy
+    ) {
       return;
     }
 
-    setApprovalStatus("APPROVED");
-    setExecutionStatus("EXECUTING");
-    setVerificationStatus("PENDING");
+    setBusy(true);
+    setError("");
 
-    const result = await applyIntervention({
-      scenario_id: dashboard.scenarioId,
-      target_flight_id: dashboard.targetFlight.id,
-      candidate_id: selectedCandidate.id,
-      approval: {
-        decision: "APPROVED",
-        operator: "DEMO_OPERATOR",
-      },
-    });
+    const result =
+      await approveCopilotRun(
+        {
+          run_id:
+            agentState.run_id,
 
-    if (result.ok) {
-      setExecutionMode("ENGINE");
-      setExecutionStatus("EXECUTED");
-    } else {
-      setExecutionMode("SIMULATION_FALLBACK");
-      setExecutionStatus("EXECUTED");
+          decided_by:
+            "demo_dispatcher",
+        },
+      );
+
+    setBusy(false);
+
+    if (!result.ok) {
+      setError(
+        result.error ||
+          "Approval failed.",
+      );
+      return;
     }
 
-    setTimeout(async () => {
-      const verification = await verifyIntervention({
-        scenario_id: dashboard.scenarioId,
-        target_flight_id: dashboard.targetFlight.id,
-        candidate_id: selectedCandidate.id,
-      });
+    setAgentState(
+      result.data,
+    );
 
-      if (verification.ok) {
-        setExecutionMode("ENGINE");
-      }
-
-      setVerificationStatus(
-        "VERIFIED"
+    const normalized =
+      normalizeAgentState(
+        result.data,
       );
-    }, 550);
+
+    setDashboard(
+      normalized,
+    );
+
+    setSelectedCandidateId(
+      normalized.recommendation
+        ?.candidateId ||
+        selectedCandidateId,
+    );
   }
 
-  function handleReject(reason) {
-    const cleanReason = String(reason || "").trim();
+
+  async function handleReject(
+    reason,
+  ) {
+    const cleanReason =
+      String(
+        reason || "",
+      ).trim();
 
     if (!cleanReason) {
       window.alert(
-        "Rejection reason is required before rejecting a recommendation."
+        "A rejection reason is required.",
       );
       return;
     }
 
-    const currentIndex = dashboard.candidates.findIndex(
-      (candidate) => candidate.id === selectedCandidate.id
+    if (
+      !agentState ||
+      busy
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
+    const result =
+      await rejectCopilotRun(
+        {
+          run_id:
+            agentState.run_id,
+
+          reason:
+            cleanReason,
+
+          decided_by:
+            "demo_dispatcher",
+        },
+      );
+
+    setBusy(false);
+
+    if (!result.ok) {
+      setError(
+        result.error ||
+          "Recommendation rejection failed.",
+      );
+      return;
+    }
+
+    setAgentState(
+      result.data,
     );
 
-    const nextCandidate = dashboard.candidates
-      .slice(currentIndex + 1)
-      .find((candidate) => candidate.feasible);
+    const normalized =
+      normalizeAgentState(
+        result.data,
+      );
 
-    setRejectedCandidate(selectedCandidate.id);
-    setApprovalStatus("REJECTED");
-    setExecutionStatus("LOCKED");
-    setVerificationStatus("PENDING");
+    setDashboard(
+      normalized,
+    );
 
-    window.setTimeout(() => {
-      if (nextCandidate) {
-        setSelectedCandidateId(nextCandidate.id);
-        setApprovalStatus("PENDING");
-        setExecutionStatus("LOCKED");
-        setVerificationStatus("PENDING");
-      }
-    }, 900);
+    setSelectedCandidateId(
+      normalized.recommendation
+        ?.candidateId ||
+        null,
+    );
   }
 
-  const currentStage =
-    stageIndex >= 0
-      ? INVESTIGATION_STAGES[stageIndex]
-      : "OBSERVE";
+
+  function handleCandidateSelect(
+    candidateId,
+  ) {
+    const candidate =
+      dashboard?.candidates?.find(
+        (item) =>
+          item.id ===
+          candidateId,
+      );
+
+    if (
+      !candidate ||
+      !candidate.feasible
+    ) {
+      return;
+    }
+
+    setSelectedCandidateId(
+      candidateId,
+    );
+  }
+
+
+  const selectedCandidate =
+    dashboard?.candidates?.find(
+      (candidate) =>
+        candidate.id ===
+        selectedCandidateId,
+    ) ||
+    getRecommendedCandidate(
+      dashboard,
+    ) ||
+    EMPTY_CANDIDATE;
+
+
+  const recommendedCandidate =
+    getRecommendedCandidate(
+      dashboard,
+    ) ||
+    EMPTY_CANDIDATE;
+
+
+  const approvalStatus =
+    dashboard?.approvalStatus ||
+    "PENDING";
+
+
+  const phase =
+    busy
+      ? "RUNNING"
+      : !agentState
+        ? "IDLE"
+        : dashboard?.agentStage ===
+            "HUMAN_APPROVAL"
+          ? "WAITING_APPROVAL"
+          : dashboard?.agentStage ===
+              "VERIFY"
+            ? "COMPLETE"
+            : dashboard?.agentStage ===
+                "HUMAN_APPROVAL"
+              ? "WAITING_APPROVAL"
+              : dashboard?.agentStage ===
+                  "FAILED"
+                ? "FAILED"
+                : "COMPLETE";
+
 
   const uiReady =
-    phase === "COMPLETE" ||
-    approvalStatus === "PENDING" ||
-    approvalStatus === "APPROVED";
+    Boolean(
+      agentState &&
+        dashboard?.agentStage ===
+          "HUMAN_APPROVAL" &&
+        dashboard?.recommendation,
+    );
+
+
+  if (!dashboard) {
+    return (
+      <div className="app-shell">
+        <LoadingScreen />
+      </div>
+    );
+  }
+
 
   return (
     <div className="app-shell">
       <Header
-        mode={dashboard.mode}
-        phase={phase}
-        onRun={startInvestigation}
+        mode={
+          dashboard.mode
+        }
+        phase={
+          phase
+        }
+        onRun={
+          runAeris
+        }
+        disabled={
+          busy
+        }
       />
 
       <main className="command-center">
+        <ErrorBanner
+          message={
+            error
+          }
+          onRetry={
+            loadBaseline
+          }
+        />
+
         <section className="operational-strip">
           <div>
-            <span className="eyebrow">SYSTEM STATUS</span>
+            <span className="eyebrow">
+              SYSTEM STATUS
+            </span>
+
             <strong>
-              {phase === "RUNNING"
+              {busy
                 ? "AERIS investigating..."
-                : "Operational simulation ready"}
+                : agentState
+                  ? agentState.status
+                  : "Operational simulation ready"}
             </strong>
           </div>
 
           <div>
-            <span className="eyebrow">TARGET</span>
+            <span className="eyebrow">
+              TARGET
+            </span>
+
             <strong>
               {dashboard.targetFlight.callsign}
             </strong>
           </div>
 
           <div>
-            <span className="eyebrow">URGENCY</span>
-            <strong className="text-high">HIGH</strong>
+            <span className="eyebrow">
+              URGENCY
+            </span>
+
+            <strong className="text-high">
+              {agentState
+                ?.diagnosis?.urgency ||
+                "HIGH"}
+            </strong>
           </div>
 
           <div>
-            <span className="eyebrow">SIMULATION TIME</span>
+            <span className="eyebrow">
+              SIMULATION TIME
+            </span>
+
             <strong>
               T+
-              {String(dashboard.simulationTimeMin).padStart(
+              {String(
+                dashboard.simulationTimeMin,
+              ).padStart(
                 2,
-                "0"
+                "0",
               )}
             </strong>
           </div>
 
           <div>
-            <span className="eyebrow">CAPACITY</span>
+            <span className="eyebrow">
+              AIRPORT
+            </span>
+
             <strong>
-              {dashboard.airport.arrivalCapacityPer15Min}
-              <span className="subtle-unit">
-                {" "}
-                / {dashboard.airport.normalArrivalCapacityPer15Min}
-              </span>
+              {dashboard.airport.id}
             </strong>
           </div>
         </section>
 
         <RecommendationBanner
-          candidate={selectedCandidate}
-          recommendation={dashboard.recommendation}
+          candidate={
+            recommendedCandidate
+          }
+          recommendation={
+            dashboard.recommendation
+          }
           approvalStatus={
-            phase === "RUNNING"
-              ? "ANALYSIS"
-              : approvalStatus
+            approvalStatus
           }
         />
 
         <div className="dashboard-grid top-grid">
           <div className="main-column">
-            <DisruptionAlert disruption={dashboard.disruption} />
+            <DisruptionAlert
+              disruption={
+                dashboard.disruption
+              }
+            />
 
             <AirspaceMap
-              selectedCandidate={selectedCandidate}
-              targetFlightId={dashboard.targetFlight.id}
+              selectedCandidate={
+                selectedCandidate
+              }
+              targetFlightId={
+                dashboard.targetFlight.id
+              }
+              sectors={
+                dashboard.sectors
+              }
+              weather={
+                dashboard.weather
+              }
             />
           </div>
 
           <div className="side-column">
-            <FlightDetail flight={dashboard.targetFlight} />
+            <FlightDetail
+              flight={
+                dashboard.targetFlight
+              }
+            />
 
             <MetricsPanel
-              network={dashboard.network}
-              selectedCandidate={selectedCandidate}
+              network={
+                dashboard.network
+              }
+              selectedCandidate={
+                selectedCandidate
+              }
             />
           </div>
         </div>
 
         <div className="dashboard-grid">
           <CandidateCards
-            candidates={dashboard.candidates}
-            selectedId={selectedCandidate.id}
-            onSelect={handleCandidateSelect}
+            candidates={
+              dashboard.candidates
+            }
+            selectedId={
+              selectedCandidate.id
+            }
+            onSelect={
+              handleCandidateSelect
+            }
           />
 
           <AgentDecisionTrail
-            currentStage={currentStage}
-            approvalStatus={
-              phase === "RUNNING"
-                ? "PENDING"
-                : approvalStatus
+            currentStage={
+              dashboard.agentStage
             }
-            executionStatus={executionStatus}
-            verificationStatus={verificationStatus}
-            rejectedCandidate={rejectedCandidate}
+            approvalStatus={
+              approvalStatus
+            }
+            executionStatus={
+              dashboard.executionStatus
+            }
+            verificationStatus={
+              dashboard.verificationStatus
+            }
+            rejectedCandidate={
+              dashboard.rawAgentState
+                ?.approval?.decision ===
+              "REJECTED"
+                ? dashboard.rawAgentState
+                    ?.recommendation
+                    ?.candidate_id
+                : null
+            }
           />
         </div>
 
         <ComparisonTable
-          candidates={dashboard.candidates}
-          selectedId={selectedCandidate.id}
+          candidates={
+            dashboard.candidates
+          }
+          selectedId={
+            selectedCandidate.id
+          }
         />
 
-        <div className="dashboard-grid lower-grid">
-          <ApprovalPanel
-            candidate={selectedCandidate}
-            approvalStatus={approvalStatus}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            disabled={
-              !uiReady ||
-              phase === "RUNNING" ||
-              executionStatus === "EXECUTING"
-            }
-          />
+        {dashboard.recommendation && (
+          <div className="dashboard-grid lower-grid">
+            <ApprovalPanel
+              candidate={
+                recommendedCandidate
+              }
+              approvalStatus={
+                approvalStatus
+              }
+              onApprove={
+                handleApprove
+              }
+              onReject={
+                handleReject
+              }
+              disabled={
+                !uiReady ||
+                busy
+              }
+            />
 
-          <VerificationPanel
-            executionStatus={executionStatus}
-            verificationStatus={verificationStatus}
-            verification={dashboard.verification}
-            executionMode={executionMode}
-          />
-        </div>
+            <VerificationPanel
+              executionStatus={
+                dashboard.executionStatus
+              }
+              verificationStatus={
+                dashboard.verificationStatus
+              }
+              verification={
+                dashboard.verification
+              }
+              executionMode={
+                dashboard.executionMode
+              }
+            />
+          </div>
+        )}
 
         <Timeline
-          items={DEMO_TIMELINE}
-          simulationTimeMin={dashboard.simulationTimeMin}
+          items={
+            dashboard.timeline
+          }
+          simulationTimeMin={
+            dashboard.simulationTimeMin
+          }
         />
 
         <footer className="app-footer">
           <div>
-            <strong>AERIS</strong>
+            <strong>
+              AERIS
+            </strong>
+
             <span>
               Human-supervised agentic airspace resilience
             </span>
           </div>
 
           <div>
-            <span>DETERMINISTIC ENGINE AUTHORITY</span>
-            <span>•</span>
-            <span>NO AUTONOMOUS ATC CONTROL</span>
-            <span>•</span>
-            <span>SIMULATION ENVIRONMENT</span>
+            <span>
+              DETERMINISTIC ENGINE AUTHORITY
+            </span>
+
+            <span>
+              •
+            </span>
+
+            <span>
+              HUMAN APPROVAL REQUIRED
+            </span>
+
+            <span>
+              •
+            </span>
+
+            <span>
+              SIMULATION ENVIRONMENT
+            </span>
           </div>
         </footer>
       </main>
     </div>
   );
 }
+
 
 export default App;

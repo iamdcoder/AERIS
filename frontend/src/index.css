@@ -1495,3 +1495,75 @@ tbody tr:hover {
     height: 450px;
   }
 }
+.loading-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--bg);
+}
+
+.loading-mark {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(84, 214, 255, 0.4);
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.loading-screen strong {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+
+.loading-screen span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.error-banner {
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 15px;
+  border: 1px solid rgba(255, 115, 115, 0.25);
+  border-radius: 8px;
+  background: rgba(255, 115, 115, 0.07);
+}
+
+.error-banner > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.error-banner strong {
+  color: var(--danger);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.error-banner span {
+  color: #c88e8e;
+  font-size: 9px;
+}
+
+.error-banner button {
+  border: 1px solid rgba(255, 115, 115, 0.3);
+  border-radius: 6px;
+  padding: 7px 11px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 900;
+}
