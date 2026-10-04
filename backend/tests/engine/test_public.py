@@ -168,6 +168,32 @@ def test_decision_context_freezes_snapshot_and_score_against_live_world_drift():
             assert "stress_report" in candidate["decision_context"]
 
 
+def test_candidate_evaluation_mutates_only_private_clone_not_decision_state(monkeypatch):
+    public.advance_simulation(19)
+    candidates = public.generate_alternatives("F102")
+    decision = public.begin_decision_context(["F102"], candidates)
+    context_id = decision["snapshot_id"]
+    context = public._DECISION_CONTEXTS[context_id]
+    original_fuel = context.state.aircraft["F102"].fuel_remaining_min
+    original_snapshot = public.get_decision_context(context_id)["snapshot"]
+    observed_clones = []
+    original_simulate = public._simulate_candidate
+
+    def mutate_clone_then_simulate(cloned_state, candidate, horizon_min):
+        observed_clones.append(cloned_state)
+        cloned_state.aircraft["F102"].fuel_remaining_min = 0.0
+        cloned_state.sectors["S1"].capacity = 0
+        return original_simulate(cloned_state, candidate, horizon_min)
+
+    monkeypatch.setattr(public, "_simulate_candidate", mutate_clone_then_simulate)
+    public.simulate_candidate(candidates[0])
+
+    assert observed_clones
+    assert observed_clones[0] is not context.state
+    assert context.state.aircraft["F102"].fuel_remaining_min == original_fuel
+    assert public.get_decision_context(context_id)["snapshot"] == original_snapshot
+
+
 def test_score_tie_breaking_is_repeatable_and_uses_ripple_fuel_order(monkeypatch):
     candidates = public.generate_alternatives("F102")
     public.begin_decision_context(["F102"], candidates)
@@ -239,6 +265,28 @@ def test_scoring_never_ranks_infeasible_candidate_above_feasible(monkeypatch):
     scored = public.score_candidates(candidates)
     assert scored[0]["candidate_id"] == "ALT-E"
     assert all(item["decision_score"] == 0.0 for item in scored)
+
+
+def test_begin_decision_context_does_not_mutate_candidate_definitions():
+    candidates = public.generate_alternatives("F102")
+    before = deepcopy(candidates)
+
+    context = public.begin_decision_context(["F102"], candidates)
+
+    assert candidates == before
+    assert context["decision_time"] == 0
+
+
+def test_candidates_from_different_decision_snapshots_cannot_be_ranked_together():
+    first_candidates = public.generate_alternatives("F102")
+    first_context = public.begin_decision_context(["F102"], first_candidates)
+    public.advance_simulation(1)
+    second_candidates = public.generate_alternatives("F102")
+    second_context = public.begin_decision_context(["F102"], second_candidates)
+
+    assert first_context["snapshot_id"] != second_context["snapshot_id"]
+    with pytest.raises(ValueError, match="different decision snapshots"):
+        public.score_candidates([first_candidates[0], second_candidates[0]])
 
 
 def test_infeasible_candidate_is_stored_with_zero_score(monkeypatch):

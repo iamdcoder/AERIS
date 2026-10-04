@@ -79,6 +79,18 @@ def test_fuel_constraint_accepts_exact_reserve_boundary():
     assert result["reserve_margin_min"] == pytest.approx(0.0, abs=1e-2)
 
 
+def test_low_altitude_fuel_penalty_comes_from_aircraft_profile():
+    state = load_world()
+    flight = state.aircraft["F102"]
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    low = fuel_feasibility(state, flight, route, speed_kt=430, cruise_altitude_ft=26000)
+    high = fuel_feasibility(state, flight, route, speed_kt=430, cruise_altitude_ft=30000)
+    assert low["estimated_flight_time_min"] - high["estimated_flight_time_min"] == pytest.approx(
+        flight.low_altitude_fuel_penalty_min
+    )
+
+
 # TEST 7 — WEATHER: NO INTERSECTION
 def test_weather_constraint_passes_for_route_outside_weather():
     state = load_world()
@@ -368,6 +380,23 @@ def test_capacity_bom_degraded_window_flagged_after_t8():
     assert "arrival_pressure_note" in result["airport"]
 
 
+def test_bom_capacity_pressure_counts_holding_inbound_flights():
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(10)
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    expected_inbound = sum(
+        1
+        for flight in sim.state.aircraft.values()
+        if flight.destination == "BOM" and flight.status not in {"LANDED", "CANCELLED"}
+    )
+    result = capacity_check(sim.state, route)
+
+    assert expected_inbound >= len(sim.state.holding_flights)
+    assert result["airport"]["inbound_count"] == expected_inbound
+    assert result["airport"]["projected_arrival_pressure"] == expected_inbound + 1
+
+
 # TEST 27 — SPEED AFFECTS TRAVERSAL TIME (HIGHER SPEED → EARLIER ARRIVAL)
 def test_capacity_higher_speed_yields_earlier_arrival():
     """A faster candidate should arrive at BOM earlier (lower arrival_time_min)."""
@@ -481,3 +510,375 @@ def test_conflict_same_waypoint_zero_spatial_separation():
     c = result["conflicts"][0]
     # Same position, same speed → near-zero spatial separation.
     assert c["estimated_spatial_separation_nm"] == pytest.approx(0.0, abs=0.1)
+
+
+# ===========================================================================
+# TASK 2 — CAPACITY MUST CAUSE REAL OUTCOMES
+# ===========================================================================
+
+def test_sector_capacity_reduction_changes_feasibility_and_restoring_restores_feasibility():
+    """Lowering sector capacity below projected demand causes failure; restoring capacity passes."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    # Original state: passes with headroom
+    original = capacity_check(state, route)
+    assert original["passed"] is True
+
+    # Constrain sector S4 capacity
+    orig_cap = state.sectors["S4"].capacity
+    state.sectors["S4"].capacity = 0
+    constrained = capacity_check(state, route)
+    assert constrained["passed"] is False
+    assert "S4" in constrained["overloaded_sectors"]
+
+    # Restore capacity
+    state.sectors["S4"].capacity = orig_cap
+    restored = capacity_check(state, route)
+    assert restored["passed"] is True
+    assert restored["overloaded_sectors"] == []
+
+
+def test_sector_capacity_reduction_increases_network_delay_and_restoring_restores_delay():
+    """Lowering sector capacity increases network delay; restoring capacity restores lower delay."""
+    from app.engine.simulation.network import simulate_candidate
+
+    state = load_world()
+    candidate = {
+        "candidate_id": "ALT-TEST-CAP",
+        "flight_id": "F102",
+        "route": ["W0", "W4", "W5", "W7", "BOM"],
+        "speed_kt": 430,
+        "cruise_altitude_ft": 32000,
+    }
+
+    base_sim = simulate_candidate(state, candidate)
+    base_delay = base_sim["candidate_total_delay_min"]
+
+    # Severely restrict sector capacity for traversed sector S4
+    orig_cap = state.sectors["S4"].capacity
+    state.sectors["S4"].capacity = 1
+    restricted_sim = simulate_candidate(state, candidate)
+    restricted_delay = restricted_sim["candidate_total_delay_min"]
+
+    assert restricted_delay > base_delay
+
+    # Restore capacity
+    state.sectors["S4"].capacity = orig_cap
+    restored_sim = simulate_candidate(state, candidate)
+    assert restored_sim["candidate_total_delay_min"] == pytest.approx(base_delay)
+
+
+def test_airport_closed_changes_feasibility_and_reopening_restores_feasibility():
+    """Closing destination airport causes hard failure; reopening restores feasibility."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    assert capacity_check(state, route)["passed"] is True
+
+    # Close BOM
+    state.airports["BOM"].operational_status = "CLOSED"
+    closed_check = capacity_check(state, route)
+    assert closed_check["passed"] is False
+    assert closed_check["airport"]["passed"] is False
+
+    # Reopen BOM
+    state.airports["BOM"].operational_status = "NORMAL"
+    reopened_check = capacity_check(state, route)
+    assert reopened_check["passed"] is True
+    assert reopened_check["airport"]["passed"] is True
+
+
+def test_airport_arrival_capacity_reduction_increases_network_delay_and_restoring_restores_delay():
+    """Lowering airport arrival capacity causes arrival congestion delay; restoring restores lower delay."""
+    from app.engine.simulation.network import simulate_candidate
+
+    state = load_world()
+    candidate = {
+        "candidate_id": "ALT-TEST-AIR",
+        "flight_id": "F102",
+        "route": ["W0", "W4", "W5", "W7", "BOM"],
+        "speed_kt": 430,
+        "cruise_altitude_ft": 32000,
+    }
+
+    orig_capacity = state.airports["BOM"].arrival_capacity
+    state.time_min = 10
+
+    # Normal capacity
+    normal_sim = simulate_candidate(state, candidate)
+
+    # Restrict arrival capacity severely
+    state.airports["BOM"].arrival_capacity = 2
+    restricted_sim = simulate_candidate(state, candidate)
+    assert restricted_sim["candidate_total_delay_min"] > normal_sim["candidate_total_delay_min"]
+
+    # Restore arrival capacity
+    state.airports["BOM"].arrival_capacity = orig_capacity
+    restored_sim = simulate_candidate(state, candidate)
+    assert restored_sim["candidate_total_delay_min"] == pytest.approx(normal_sim["candidate_total_delay_min"])
+
+
+# ===========================================================================
+# TASK 3 — CONFLICT DETECTION
+# ===========================================================================
+
+def test_conflict_aircraft_already_ahead_on_same_route_passes():
+    """A candidate arriving at a waypoint after traffic has already passed does not conflict."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    candidate_route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(candidate_route)
+    # The traffic flight has already reached W4; F102 must still traverse W0->W4.
+    other.route_index = 1
+    other.edge_progress_min = 0.0
+    other.status = "AIRBORNE"
+    state.aircraft["AI2-01"].speed_kt = target_flight.speed_kt
+
+    result = conflict_check(state, "F102", candidate_route, target_flight.speed_kt)
+    assert result["passed"] is True
+    assert result["conflicts"] == []
+
+
+def test_conflict_nearby_spatially_separated_traffic_passes():
+    """Traffic on parallel routes > 5.0 NM apart should not produce a false conflict."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    route_a = ["W0", "W4", "W5", "W7", "BOM"]
+    route_b = ["W1", "W2", "W3", "W10", "W11", "BOM"]
+    assert route_is_valid(state.graph, route_b) == (True, None)
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(route_b)
+    other.route_index = 0
+    other.status = "AIRBORNE"
+
+    result = conflict_check(state, "F102", route_a, target_flight.speed_kt)
+    assert result["passed"] is True
+    assert result["conflicts"] == []
+
+
+def test_conflict_candidate_introduces_conflict_causes_validator_rejection():
+    """A candidate route that introduces a conflict causes validate_candidate to return feasible: False."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    candidate_route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(candidate_route)
+    other.route_index = 0
+    other.edge_progress_min = 0.0
+    other.status = "AIRBORNE"
+    other.speed_kt = target_flight.speed_kt
+
+    candidate = {
+        "candidate_id": "ALT-CONFLICT",
+        "flight_id": "F102",
+        "route": candidate_route,
+        "speed_kt": target_flight.speed_kt,
+        "cruise_altitude_ft": target_flight.altitude_ft,
+    }
+
+    res = validate_candidate(state, candidate)
+    assert res["feasible"] is False
+    assert any("conflict" in r.lower() for r in res["rejection_reasons"])
+
+
+def test_conflict_detection_repeatability():
+    """Calling conflict_check twice on identical state produces identical output."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    candidate_route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    r1 = conflict_check(state, "F102", candidate_route, target_flight.speed_kt)
+    r2 = conflict_check(state, "F102", candidate_route, target_flight.speed_kt)
+    assert r1 == r2
+
+
+# ===========================================================================
+# TASK 4 — AIRCRAFT PERFORMANCE
+# ===========================================================================
+
+def test_performance_normal_aircraft_within_envelope_passes():
+    """Normal aircraft operating at FL350 and 430 kt passes performance check."""
+    from app.engine.constraints.performance import performance_check
+
+    state = load_world()
+    flight = state.aircraft["F102"]
+    flight.status = "AIRBORNE"
+
+    res = performance_check(state, flight, cruise_altitude_ft=35000, speed_kt=430)
+    assert res["passed"] is True
+    assert res["violation_reason"] is None
+
+
+def test_performance_normal_aircraft_beyond_altitude_envelope_fails():
+    """Normal aircraft attempting cruise at FL410 (> 39,000 ft limit) fails performance check."""
+    from app.engine.constraints.performance import performance_check
+
+    state = load_world()
+    flight = state.aircraft["F102"]
+    flight.status = "AIRBORNE"
+
+    res = performance_check(state, flight, cruise_altitude_ft=41000, speed_kt=430)
+    assert res["passed"] is False
+    assert "exceeds maximum performance envelope" in res["violation_reason"]
+
+
+def test_performance_degraded_aircraft_at_normal_altitude_fails():
+    """DEGRADED aircraft attempting FL350 (allowed normally, but > 33,000 ft degraded ceiling) fails."""
+    from app.engine.constraints.performance import performance_check
+
+    state = load_world()
+    flight = state.aircraft["F102"]
+    flight.status = "DEGRADED"
+
+    res = performance_check(state, flight, cruise_altitude_ft=35000, speed_kt=430)
+    assert res["passed"] is False
+    assert "33000" in res["violation_reason"]
+
+
+def test_performance_excessive_speed_fails():
+    """Candidate with speed 500 kt (> 460 kt limit) fails performance check."""
+    from app.engine.constraints.performance import performance_check
+
+    state = load_world()
+    flight = state.aircraft["F102"]
+    flight.status = "AIRBORNE"
+
+    res = performance_check(state, flight, cruise_altitude_ft=35000, speed_kt=500)
+    assert res["passed"] is False
+    assert "exceeds maximum performance speed" in res["violation_reason"]
+
+
+def test_performance_check_repeatability():
+    """Calling performance_check twice yields identical results."""
+    from app.engine.constraints.performance import performance_check
+
+    state = load_world()
+    flight = state.aircraft["F102"]
+
+    res1 = performance_check(state, flight, cruise_altitude_ft=34000, speed_kt=430)
+    res2 = performance_check(state, flight, cruise_altitude_ft=34000, speed_kt=430)
+    assert res1 == res2
+
+
+# ===========================================================================
+# TASK 6 — EXPLICIT FAILURE-MODE REGRESSION TESTS
+# ===========================================================================
+
+def test_failure_mode_1_no_feasible_route():
+    """Failure Mode 1: Route with invalid/disconnected waypoint causes candidate rejection."""
+    state = load_world()
+    candidate = {
+        "candidate_id": "ALT-FAIL-ROUTE",
+        "flight_id": "F102",
+        "route": ["W0", "INVALID_WAYPOINT", "BOM"],
+        "speed_kt": 430,
+        "cruise_altitude_ft": 32000,
+    }
+
+    initial_state_snap = state.clone()
+    res1 = validate_candidate(state, candidate)
+    assert res1["feasible"] is False
+    assert any("Unknown waypoint" in r for r in res1["rejection_reasons"])
+    assert state.time_min == initial_state_snap.time_min
+
+    res2 = validate_candidate(state, candidate)
+    assert res1 == res2
+
+def test_failure_mode_2_insufficient_fuel():
+    """Failure Mode 2: Flight with insufficient fuel for route + 12 min reserve causes rejection."""
+    state = load_world()
+    flight = state.aircraft["F102"]
+    flight.fuel_remaining_min = 5.0
+
+    candidate = {
+        "candidate_id": "ALT-FAIL-FUEL",
+        "flight_id": "F102",
+        "route": ["W0", "W4", "W5", "W7", "BOM"],
+        "speed_kt": flight.speed_kt,
+        "cruise_altitude_ft": flight.altitude_ft,
+    }
+
+    res1 = validate_candidate(state, candidate)
+    assert res1["feasible"] is False
+    assert "Insufficient fuel reserve for candidate route" in res1["rejection_reasons"]
+
+    res2 = validate_candidate(state, candidate)
+    assert res1 == res2
+
+
+def test_failure_mode_3_restricted_airspace():
+    """Failure Mode 3: Candidate traversing active restriction polygon at restricted altitude fails."""
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(18)
+
+    candidate = {
+        "candidate_id": "ALT-FAIL-RESTRICTION",
+        "flight_id": "F102",
+        "route": ["W0", "W4", "W5", "W10", "W11", "W12", "BOM"],
+        "speed_kt": 430,
+        "cruise_altitude_ft": 34000,
+    }
+
+    res1 = validate_candidate(sim.state, candidate)
+    assert res1["feasible"] is False
+    assert any("airspace restriction" in r.lower() for r in res1["rejection_reasons"])
+
+    res2 = validate_candidate(sim.state, candidate)
+    assert res1 == res2
+
+
+def test_failure_mode_4_sector_overload():
+    """Failure Mode 4: Candidate traversing an overloaded sector fails capacity constraint."""
+    state = load_world()
+    state.sectors["S4"].capacity = 1
+    state.sectors["S4"].current_traffic = 1
+
+    candidate = {
+        "candidate_id": "ALT-FAIL-SECTOR",
+        "flight_id": "F102",
+        "route": ["W0", "W4", "W5", "W7", "BOM"],
+        "speed_kt": 430,
+        "cruise_altitude_ft": 32000,
+    }
+
+    res1 = validate_candidate(state, candidate)
+    assert res1["feasible"] is False
+    assert any("Sector S4 exceeds capacity" in r for r in res1["rejection_reasons"])
+
+    res2 = validate_candidate(state, candidate)
+    assert res1 == res2
+
+
+def test_failure_mode_5_conflict():
+    """Failure Mode 5: Candidate introducing a spatial-temporal conflict fails conflict constraint."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    candidate_route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(candidate_route)
+    other.route_index = 0
+    other.edge_progress_min = 0.0
+    other.status = "AIRBORNE"
+    other.speed_kt = target_flight.speed_kt
+
+    candidate = {
+        "candidate_id": "ALT-FAIL-CONFLICT",
+        "flight_id": "F102",
+        "route": candidate_route,
+        "speed_kt": target_flight.speed_kt,
+        "cruise_altitude_ft": target_flight.altitude_ft,
+    }
+
+    res1 = validate_candidate(state, candidate)
+    assert res1["feasible"] is False
+    assert any("conflict" in r.lower() for r in res1["rejection_reasons"])
+
+    res2 = validate_candidate(state, candidate)
+    assert res1 == res2
+

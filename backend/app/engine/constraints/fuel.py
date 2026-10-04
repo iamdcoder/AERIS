@@ -13,11 +13,17 @@ def fuel_feasibility(
     speed_kt: float | None = None,
     cruise_altitude_ft: float | None = None,
 ) -> dict:
-    speed = float(speed_kt or flight.speed_kt)
-    altitude = float(cruise_altitude_ft or flight.altitude_ft)
+    speed = float(flight.speed_kt if speed_kt is None else speed_kt)
+    altitude = float(flight.altitude_ft if cruise_altitude_ft is None else cruise_altitude_ft)
     distance_km = route_distance_km(state.graph, route)
     speed_km_min = max(1.0, speed * 1.852 / 60.0)
-    alt_penalty = 8.0 if altitude <= 26000 else 0.0
+    low_altitude_limit = getattr(flight, "low_altitude_threshold_ft", None)
+    low_altitude_penalty = max(0.0, float(getattr(flight, "low_altitude_fuel_penalty_min", 0.0)))
+    alt_penalty = (
+        low_altitude_penalty
+        if low_altitude_limit is not None and altitude <= float(low_altitude_limit)
+        else 0.0
+    )
     estimated_flight_min = (distance_km / speed_km_min) * 1.5 + alt_penalty
     reserve_margin = flight.fuel_remaining_min - estimated_flight_min - MIN_RESERVE_MIN
     feasible = reserve_margin >= 0

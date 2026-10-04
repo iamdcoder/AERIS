@@ -21,7 +21,7 @@ def validate_candidate(state, candidate: dict) -> dict:
         "route": {"passed": valid, "error": route_error},
         "weather": weather_intersection(state, route) if valid else {"passed": False},
         "fuel": fuel_feasibility(state, flight, route, speed, altitude) if valid else {"feasible": False},
-        "capacity": capacity_check(state, route) if valid else {"passed": False},
+        "capacity": capacity_check(state, route, speed_kt=speed) if valid else {"passed": False},
         "conflict": conflict_check(state, flight_id, route, speed) if valid else {"passed": False},
         "restriction": restriction_check(state, route, altitude) if valid else {"passed": False},
         "performance": performance_check(state, flight, altitude, speed) if valid else {"passed": False},

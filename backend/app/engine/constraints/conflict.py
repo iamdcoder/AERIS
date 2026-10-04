@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from math import sqrt
-
 from ..routes.graph import haversine_km, route_distance_km
 
 
@@ -14,6 +12,10 @@ _KM_PER_NM = 1.852
 
 
 def _node_etas(state, flight, route: list[str], speed_kt: float, start_time: float) -> dict[str, float]:
+    if not route:
+        return {}
+    if getattr(flight, "status", "") == "HOLDING":
+        return {route[0]: start_time}
     etas = {route[0]: start_time}
     elapsed = 0.0
     for u, v in zip(route, route[1:]):
@@ -75,16 +77,17 @@ def conflict_check(state, target_flight_id: str, route: list[str], speed_kt: flo
     conflicts = []
 
     for other in state.aircraft.values():
-        if other.id == target_flight_id or other.status != "AIRBORNE":
+        if other.id == target_flight_id or other.status not in {"AIRBORNE", "DEGRADED", "HOLDING"}:
             continue
         other_route = other.route[other.route_index:]
         if len(other_route) < 2:
             continue
         other_etas = _node_etas(state, other, other_route, other.speed_kt, state.time_min)
+
+        # Check 1: Shared node proximity
         shared = set(target_etas).intersection(other_etas)
+        conflict_found = False
         for node in shared:
-            # Only treat conflicts introduced by a deviation as hard failures.
-            # Existing traffic on the currently filed route is surfaced by simulation.
             if node not in new_candidate_nodes:
                 continue
             delta = abs(target_etas[node] - other_etas[node])
@@ -98,12 +101,8 @@ def conflict_check(state, target_flight_id: str, route: list[str], speed_kt: flo
                     other_etas,
                     conflict_time,
                 )
-                # Build the segment label for the conflicting node.
                 node_idx = route.index(node) if node in route else -1
-                if node_idx > 0:
-                    segment = f"{route[node_idx - 1]}->{node}"
-                else:
-                    segment = f"->{node}"
+                segment = f"{route[node_idx - 1]}->{node}" if node_idx > 0 else f"->{node}"
 
                 conflicts.append({
                     "aircraft": other.id,
@@ -114,9 +113,45 @@ def conflict_check(state, target_flight_id: str, route: list[str], speed_kt: flo
                     "estimated_spatial_separation_nm": spatial_sep,
                     "required_separation_nm": SEPARATION_NM,
                     "severity": "HIGH" if spatial_sep < SEPARATION_NM else "MEDIUM",
-                    # Legacy key preserved for backward compatibility.
                     "estimated_lateral_separation_nm": spatial_sep,
                 })
+                conflict_found = True
+                break
+
+        if conflict_found:
+            continue
+
+        # Check 2: Segment spatial-temporal proximity for candidate deviation edges
+        for u, v in zip(route, route[1:]):
+            if v not in new_candidate_nodes and u not in new_candidate_nodes:
+                continue
+            t_u = target_etas.get(u)
+            t_v = target_etas.get(v)
+            if t_u is None or t_v is None:
+                continue
+            start_t = int(t_u)
+            end_t = int(t_v) + 1
+            for t_step in range(start_t, end_t):
+                t_pos = _interpolate_position(state, route, target_etas, float(t_step))
+                o_pos = _interpolate_position(state, other_route, other_etas, float(t_step))
+                if t_pos is not None and o_pos is not None:
+                    dist_km = haversine_km(t_pos[0], t_pos[1], o_pos[0], o_pos[1])
+                    dist_nm = round(dist_km / _KM_PER_NM, 2)
+                    if dist_nm < SEPARATION_NM:
+                        conflicts.append({
+                            "aircraft": other.id,
+                            "waypoint": v,
+                            "segment": f"{u}->{v}",
+                            "predicted_time_min": float(t_step),
+                            "time_separation_min": 0.0,
+                            "estimated_spatial_separation_nm": dist_nm,
+                            "required_separation_nm": SEPARATION_NM,
+                            "severity": "HIGH",
+                            "estimated_lateral_separation_nm": dist_nm,
+                        })
+                        conflict_found = True
+                        break
+            if conflict_found:
                 break
 
     return {

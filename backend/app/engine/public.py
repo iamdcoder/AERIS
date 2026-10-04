@@ -143,15 +143,18 @@ def begin_decision_context(
         for candidate in supplied:
             key = _candidate_identity(candidate)
             _require_flight(state, key[0])
+            candidate["decision_context_id"] = context.context_id
             context.candidate_definitions[key] = deepcopy(candidate)
             if key not in context.candidate_keys:
                 context.candidate_keys.append(key)
-            candidate["decision_context_id"] = context.context_id
         _DECISION_CONTEXTS[context.context_id] = context
         _ACTIVE_DECISION_CONTEXT_ID = context.context_id
         for key in keys:
             _CANDIDATES[key]["decision_context_id"] = context.context_id
             context.candidate_definitions.setdefault(key, deepcopy(_CANDIDATES[key]))
+        for key in context.candidate_keys:
+            if key in _CANDIDATES:
+                _CANDIDATES[key]["decision_context_id"] = context.context_id
         return {
             "decision_time": context.decision_time,
             "snapshot_id": context.context_id,
@@ -210,7 +213,7 @@ def _context_for_candidate(
 def _candidate_for_snapshot(context: _DecisionContext, candidate: dict) -> dict:
     frozen_candidate = deepcopy(candidate)
     key = (candidate["flight_id"], candidate["candidate_id"])
-    registered = _CANDIDATES.get(key)
+    registered = context.candidate_definitions.get(key) or _CANDIDATES.get(key)
     if registered is not None:
         definition_fields = (
             "candidate_id",
@@ -256,9 +259,19 @@ def generate_alternatives(flight_id: str) -> list[dict]:
         candidates = generate_candidate_routes(state.graph, flight_id)
         for key in [key for key in _CANDIDATES if key[0] == flight_id]:
             del _CANDIDATES[key]
+        candidate_keys = []
         for candidate in candidates:
             candidate_flight_id, candidate_id = _candidate_identity(candidate)
-            _CANDIDATES[(candidate_flight_id, candidate_id)] = deepcopy(candidate)
+            key = (candidate_flight_id, candidate_id)
+            candidate_keys.append(key)
+            _CANDIDATES[key] = deepcopy(candidate)
+        context = _make_decision_context(state, candidate_keys)
+        _DECISION_CONTEXTS[context.context_id] = context
+        _ACTIVE_DECISION_CONTEXT_ID = context.context_id
+        for candidate, key in zip(candidates, candidate_keys):
+            candidate["decision_context_id"] = context.context_id
+            _CANDIDATES[key]["decision_context_id"] = context.context_id
+            context.candidate_definitions[key] = deepcopy(candidate)
         return candidates
 
 
@@ -316,15 +329,27 @@ def stress_test_candidate(candidate: dict) -> dict:
 
 def score_candidates(candidates: list[dict]) -> list[dict]:
     with _LOCK:
-        scored = []
+        prepared: list[tuple[dict, str, str, _DecisionContext, dict, tuple[str, str]]] = []
         for candidate in candidates:
             flight_id, candidate_id = _candidate_identity(candidate)
             _require_flight(_engine().state, flight_id)
-            context = _context_for_candidate(flight_id, candidate_id, candidate.get("decision_context_id"))
+            context = _context_for_candidate(
+                flight_id,
+                candidate_id,
+                candidate.get("decision_context_id"),
+            )
             frozen_candidate = _candidate_for_snapshot(context, candidate)
             key = (flight_id, candidate_id)
             frozen_candidate["decision_context_id"] = context.context_id
             context.candidate_definitions.setdefault(key, deepcopy(frozen_candidate))
+            prepared.append((candidate, flight_id, candidate_id, context, frozen_candidate, key))
+
+        context_ids = {item[3].context_id for item in prepared}
+        if len(context_ids) > 1:
+            raise ValueError("Candidates from different decision snapshots cannot be ranked together")
+
+        scored = []
+        for candidate, flight_id, candidate_id, context, frozen_candidate, key in prepared:
             validation = context.validation.get(key)
             if validation is None:
                 validation = _validate_candidate(deepcopy(context.state), frozen_candidate)

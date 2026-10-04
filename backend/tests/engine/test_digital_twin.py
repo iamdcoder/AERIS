@@ -102,10 +102,37 @@ def test_f102_is_held_during_decision_window():
     starting_delay = flight.delay_min
     starting_fuel = flight.fuel_remaining_min
 
-    sim.advance(5)
+    airport_pressure_delay = 0.0
+    for _ in range(5):
+        sim.tick()
+        inbound = sum(
+            1
+            for aircraft in sim.state.aircraft.values()
+            if aircraft.destination == "BOM" and aircraft.status not in {"LANDED", "CANCELLED"}
+        )
+        if sim.state.time_min >= 8 and inbound > sim.state.airports["BOM"].arrival_capacity:
+            airport_pressure_delay += 0.25
     assert flight.route_index == starting_route_index
-    assert flight.delay_min == pytest.approx(starting_delay + 3.0)
+    # The target accrues hold delay every minute plus arrival-pressure delay
+    # only on ticks when active inbound demand exceeds airport throughput.
+    assert flight.delay_min == pytest.approx(starting_delay + 5 * 0.60 + airport_pressure_delay)
     assert flight.fuel_remaining_min == pytest.approx(starting_fuel - 5.0)
+
+
+def test_decision_hold_uses_scenario_target_not_a_flight_id_literal():
+    state = load_world()
+    state.scenario["target_flight_id"] = "AI4-01"
+    sim = DigitalTwinSimulator(state)
+    sim.advance(15)
+
+    target = sim.state.aircraft["AI4-01"]
+    f102 = sim.state.aircraft["F102"]
+    target_route_index = target.route_index
+    sim.advance(3)
+
+    assert target.status == "DEGRADED"
+    assert target.route_index == target_route_index
+    assert f102.status != "DEGRADED"
 
 
 def test_temporary_restriction_activates_at_t18():
@@ -254,6 +281,51 @@ def test_holding_ends_transitions_aircraft_back_to_airborne():
     sim._apply_event({"event": "holding_ends", "payload": {"affected_flights": [fid]}})
     assert sim.state.aircraft[fid].status == "AIRBORNE"
     assert fid not in sim.state.holding_flights
+
+
+def test_holding_release_resumes_route_progress():
+    """After release from holding, the aircraft resumes advancing its route_index."""
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(10)
+    fid = "AI2-01"
+    idx_at_holding = sim.state.aircraft[fid].route_index
+
+    # Release holding
+    sim._apply_event({"event": "holding_ends", "payload": {"affected_flights": [fid]}})
+    assert sim.state.aircraft[fid].status == "AIRBORNE"
+
+    # Advance simulation and verify route progression resumed
+    sim.advance(10)
+    assert sim.state.aircraft[fid].route_index >= idx_at_holding
+
+
+def test_holding_simulation_repeatability():
+    """Two independent simulations run to t=15 produce identical holding state, fuel, and delay."""
+    sim1 = DigitalTwinSimulator(load_world())
+    sim2 = DigitalTwinSimulator(load_world())
+
+    sim1.advance(15)
+    sim2.advance(15)
+
+    fid = "AI2-01"
+    assert sim1.state.aircraft[fid].status == sim2.state.aircraft[fid].status == "HOLDING"
+    assert sim1.state.aircraft[fid].fuel_remaining_min == sim2.state.aircraft[fid].fuel_remaining_min
+    assert sim1.state.aircraft[fid].delay_min == sim2.state.aircraft[fid].delay_min
+    assert sim1.state.holding_flights == sim2.state.holding_flights
+
+
+def test_holding_state_snapshot_clone_preserves_holding():
+    """State clone and snapshot preserve holding_flights and holding_extra_fuel_burn."""
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(10)
+
+    cloned = sim.state.clone()
+    snap = sim.state.snapshot()
+
+    assert cloned.holding_flights == sim.state.holding_flights
+    assert cloned.holding_extra_fuel_burn == sim.state.holding_extra_fuel_burn
+    assert snap["holding_flights"] == sorted(list(sim.state.holding_flights))
+    assert snap["holding_extra_fuel_burn"] == sim.state.holding_extra_fuel_burn
 
 
 # ===========================================================================

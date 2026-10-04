@@ -63,6 +63,7 @@ def _advance_network(
     horizon_min: int,
     is_candidate: bool = False,
     candidate_sectors: set[str] | None = None,
+    target_flight_id: str | None = None,
 ) -> dict[str, Any]:
     """Advance the twin minute-by-minute and add deterministic overload delay.
 
@@ -72,7 +73,7 @@ def _advance_network(
     below zero and are added to, rather than substituted for, existing delay.
     """
     state = simulator.state
-    target_id = state.scenario.get("target_flight_id", "F102")
+    target_id = target_flight_id or state.scenario.get("target_flight_id")
     candidate_sectors = candidate_sectors or set()
 
     peak_utilization = {
@@ -90,7 +91,7 @@ def _advance_network(
 
     for _ in range(max(0, horizon_min)):
         simulator.tick()
-        overloaded: list[tuple[str, int, bool]] = []
+        overloaded: list[tuple[str, int]] = []
         for sid, sector in sorted(state.sectors.items()):
             live_count = len(_flights_in_sector(state, sid))
             proj = live_count + getattr(sector, "forecast_traffic", 0)
@@ -104,18 +105,13 @@ def _advance_network(
 
             if is_overloaded:
                 overload = max(1, proj - sector.capacity + (1 if is_candidate and sid in candidate_sectors else 0))
-                overloaded.append((sid, overload, is_candidate and sid in candidate_sectors))
+                overloaded.append((sid, overload))
                 peak_overloaded.add(sid)
 
         applied_flight_ids: set[str] = set()
-        for sid, overload, from_cand in overloaded:
+        for sid, overload in overloaded:
             delay = max(0.5, 1.0 + 0.5 * (overload - 1))
             flights = _flights_in_sector(state, sid)
-            if not flights:
-                flights = [
-                    f for f in state.aircraft.values()
-                    if f.status in ("AIRBORNE", "DEGRADED", "REROUTING")
-                ]
 
             for flight in flights:
                 if flight.id in applied_flight_ids:
@@ -178,7 +174,12 @@ def simulate_candidate(state, candidate: dict, horizon_min: int = 20) -> dict:
             if node in sector.nodes:
                 cand_sectors.add(sid)
 
-    baseline_network = _advance_network(baseline_sim, horizon_min, is_candidate=False)
+    baseline_network = _advance_network(
+        baseline_sim,
+        horizon_min,
+        is_candidate=False,
+        target_flight_id=target_id,
+    )
     before = _network_snapshot(baseline_state)
     baseline_target_delay = baseline_state.aircraft[target_id].delay_min
 
@@ -193,7 +194,11 @@ def simulate_candidate(state, candidate: dict, horizon_min: int = 20) -> dict:
     target.delay_min += weather_delay
     apply_candidate_to_flight(target, candidate)
     candidate_network = _advance_network(
-        candidate_sim, horizon_min, is_candidate=True, candidate_sectors=cand_sectors
+        candidate_sim,
+        horizon_min,
+        is_candidate=True,
+        candidate_sectors=cand_sectors,
+        target_flight_id=target_id,
     )
     after = _network_snapshot(candidate_state)
 

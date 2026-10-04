@@ -35,6 +35,27 @@
       "active_to_min": 30,
       "reason": "Temporary weather-related airspace restriction near Mumbai arrival corridor",
       "active": false
+    },
+    {
+      "id": "R-FUTURE-S6-01",
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [73.27, 18.97],
+            [73.38, 18.97],
+            [73.38, 19.08],
+            [73.27, 19.08],
+            [73.27, 18.97]
+          ]
+        ]
+      },
+      "min_altitude_ft": 29000,
+      "max_altitude_ft": 31000,
+      "active_from_min": 1000,
+      "active_to_min": 1100,
+      "reason": "Future temporary restriction on the S6 eastern bypass corridor",
+      "active": false
     }
   ]
 }

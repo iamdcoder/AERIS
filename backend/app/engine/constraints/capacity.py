@@ -70,9 +70,9 @@ def _candidate_arrival_time(
 
 
 def _infer_speed(state, route: list[str]) -> float:
-    """Best-effort speed from any aircraft currently positioned at the route origin."""
+    """Infer diagnostic traversal speed from actual aircraft performance data."""
     if not route:
-        return 430.0
+        raise ValueError("speed_kt is required for an empty route")
     origin = route[0]
     for aircraft in state.aircraft.values():
         if (
@@ -82,7 +82,14 @@ def _infer_speed(state, route: list[str]) -> float:
             and aircraft.route[aircraft.route_index] == origin
         ):
             return float(aircraft.speed_kt)
-    return 430.0
+    active_speeds = [
+        float(aircraft.speed_kt)
+        for aircraft in state.aircraft.values()
+        if aircraft.status not in {"LANDED", "CANCELLED"}
+    ]
+    if not active_speeds:
+        raise ValueError("speed_kt is required when no active aircraft speed is available")
+    return sum(active_speeds) / len(active_speeds)
 
 
 # ---------------------------------------------------------------------------
@@ -157,9 +164,10 @@ def capacity_check(
             overloads.append(sid)
 
     # -----------------------------------------------------------------------
-    # Airport arrival capacity — BOM
+    # Destination airport arrival capacity
     # -----------------------------------------------------------------------
-    bom = state.airports.get("BOM")
+    airport_id = route[-1] if route else None
+    airport = state.airports.get(airport_id) if airport_id is not None else None
     airport_result: dict = {
         "passed": True,
         "projected_arrival_pressure": 0,
@@ -167,37 +175,37 @@ def capacity_check(
         "arrival_time_min": None,
     }
 
-    if bom and len(route) > 0 and route[-1] == "BOM":
+    if airport is not None:
         inbound_count = sum(
             1
             for f in state.aircraft.values()
-            if f.destination == "BOM" and f.status in {"AIRBORNE", "HOLDING"}
+            if f.destination == airport_id and f.status not in {"LANDED", "CANCELLED"}
         )
 
         predicted_arrival_min = _candidate_arrival_time(state, route, speed_kt, start_time)
-        arrival_capacity = bom.arrival_capacity
+        arrival_capacity = airport.arrival_capacity
         projected_arrivals = inbound_count + 1
 
-        # Hard failure only when the airport is operationally closed.
+        # Hard failure only when the destination airport is operationally closed.
         # The arrival_capacity figure is a per-hour throughput rate used for
         # pressure scoring, not an absolute slot ceiling on concurrent inbound
         # count (which would spuriously reject all routes in a busy scenario).
-        arrival_feasible = bom.operational_status != "CLOSED"
+        arrival_feasible = airport.operational_status != "CLOSED"
 
         airport_result = {
             # Legacy key preserved.
             "passed": arrival_feasible,
             "projected_arrival_pressure": projected_arrivals,
             "capacity": arrival_capacity,
-            "operational_status": bom.operational_status,
+            "operational_status": airport.operational_status,
             # New timing / informational keys.
             "arrival_time_min": round(predicted_arrival_min, 2),
             "inbound_count": inbound_count,
-            "degraded_window": bom.weather_status != "NORMAL",
+            "degraded_window": airport.weather_status != "NORMAL",
         }
-        if bom.weather_status != "NORMAL":
+        if airport.weather_status != "NORMAL":
             airport_result["arrival_pressure_note"] = (
-                f"BOM degraded capacity ({arrival_capacity}/hr); "
+                f"{airport.id} degraded capacity ({arrival_capacity}/hr); "
                 f"candidate predicted arrival t={round(predicted_arrival_min, 1)} min"
             )
 

@@ -101,7 +101,7 @@ def perturb_state(state, profile: dict):
                 raise ValueError(f"activate_restrictions entries must be strings, got {rid!r}")
             if rid in new_state.restrictions:
                 new_state.restrictions[rid].active = True
-            # If the restriction doesn't exist in this world snapshot, silently skip —
-            # it may be a future restriction that isn't loaded in the base dataset.
+            else:
+                raise ValueError(f"Unknown restriction in stress profile: {rid}")
 
     return new_state

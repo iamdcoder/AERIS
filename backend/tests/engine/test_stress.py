@@ -31,7 +31,7 @@ def test_stress_scenario_names():
     expected_names = [
         "Weather expansion +10%",
         "Weather expansion +20%",
-        "S6 capacity -15%",
+        "S6 capacity -15% with future bypass restriction",
         "Traffic demand +15%",
         "BOM acceptance -20%",
     ]
@@ -307,12 +307,12 @@ def test_perturb_state_activate_restrictions_does_not_mutate_original():
     assert state.snapshot() == snap_before
 
 
-def test_perturb_state_activate_unknown_restriction_is_silently_skipped():
-    """Activating a restriction that doesn't exist in the world should not raise."""
+def test_perturb_state_activate_unknown_restriction_fails_honestly():
+    """A stress profile cannot silently skip a restriction missing from world data."""
     state = load_world()
     profile = {"activate_restrictions": ["DOES-NOT-EXIST"]}
-    perturbed = perturb_state(state, profile)  # should not raise
-    assert perturbed is not state
+    with pytest.raises(ValueError, match="Unknown restriction"):
+        perturb_state(state, profile)
 
 
 def test_perturb_state_activate_restrictions_rejects_non_list():

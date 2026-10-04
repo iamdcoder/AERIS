@@ -41,7 +41,16 @@ class DigitalTwinSimulator:
         self.state.event_log.append({"t": self.state.time_min, "event": name, "payload": payload})
 
         if name == "convective_weather_develops_near_BOM":
-            cell = self.state.weather_cells["WX-BOM-01"]
+            weather_id = payload.get("weather_id")
+            if weather_id is not None:
+                cell = self.state.weather_cells[weather_id]
+            else:
+                cell = next(
+                    (item for item in self.state.weather_cells.values() if item.active),
+                    None,
+                )
+                if cell is None:
+                    raise ValueError("Weather development event has no active weather cell")
             coords = cell.geometry["coordinates"][0]
             lons = [p[0] for p in coords]
             lats = [p[1] for p in coords]
@@ -55,10 +64,15 @@ class DigitalTwinSimulator:
             cell.intensity = payload.get("intensity", "HIGH")
             cell.uncertainty = 0.25
 
-        elif name == "BOM_arrival_capacity_drops":
-            self.state.airports["BOM"].arrival_capacity = int(payload["arrival_capacity"])
-            self.state.airports["BOM"].weather_status = "SEVERE_CONVECTIVE"
-
+        elif name.endswith("_arrival_capacity_drops") or name == "airport_arrival_capacity_drops":
+            airport_id = payload.get("airport_id")
+            if airport_id is None and name != "airport_arrival_capacity_drops":
+                airport_id = name.removesuffix("_arrival_capacity_drops")
+            if airport_id not in self.state.airports:
+                raise ValueError(f"Arrival-capacity event references unknown airport: {airport_id}")
+            airport = self.state.airports[airport_id]
+            airport.arrival_capacity = int(payload["arrival_capacity"])
+            airport.weather_status = payload.get("weather_status", "SEVERE_CONVECTIVE")
         elif name == "holding_begins":
             affected = payload.get("affected_flights", [])
             self.state.holding_flights.update(affected)
@@ -67,24 +81,28 @@ class DigitalTwinSimulator:
                 if fid in self.state.aircraft:
                     f = self.state.aircraft[fid]
                     if f.status in ("AIRBORNE", "DEGRADED"):
+                        f._pre_holding_status = f.status
                         f.status = "HOLDING"
 
         elif name == "holding_ends":
             affected = payload.get("affected_flights", list(self.state.holding_flights))
-            for fid in affected:
+            for fid in list(affected):
                 self.state.holding_flights.discard(fid)
                 if fid in self.state.aircraft:
                     f = self.state.aircraft[fid]
                     if f.status == "HOLDING":
-                        f.status = "AIRBORNE"
+                        f.status = getattr(f, "_pre_holding_status", "AIRBORNE")
 
         elif name == "bypass_sector_approaches_capacity":
             sector = self.state.sectors[payload["sector_id"]]
             sector.capacity = int(payload["capacity"])
             sector.forecast_traffic = max(sector.forecast_traffic, sector.capacity - 1)
 
-        elif name == "F102_operational_degradation":
-            flight = self.state.aircraft["F102"]
+        elif name.endswith("_operational_degradation") or name == "target_operational_degradation":
+            flight_id = payload.get("flight_id", self.state.scenario.get("target_flight_id"))
+            if flight_id not in self.state.aircraft:
+                raise ValueError(f"Degradation event references unknown flight: {flight_id}")
+            flight = self.state.aircraft[flight_id]
             flight.status = payload.get("status", "DEGRADED")
             if "fuel_remaining_min" in payload:
                 flight.fuel_remaining_min = float(payload["fuel_remaining_min"])
@@ -94,14 +112,30 @@ class DigitalTwinSimulator:
             self.state.restrictions[rid].active = True
 
         elif name == "dispatcher_approval":
-            # Only clear the approval marker when no real intervention has been
-            # applied yet (via public.apply_intervention).  If apply has already
-            # set approved_intervention, leave it intact so verify_state works.
-            if self.state.approved_intervention is None:
-                self.state.approved_intervention = None  # no-op; kept for clarity
+            # The scenario event is a timeline marker; approval is applied by
+            # the public facade after an explicit caller decision.
+            pass
 
     def _events_at(self, t: int) -> list[dict[str, Any]]:
-        return [e for e in self.state.scenario.get("events", []) if int(e.get("t", -1)) == t]
+        return [event for event in self.state.scenario.get("events", []) if int(event.get("t", -1)) == t]
+
+    def _airport_arrival_pressure(self) -> None:
+        for airport in self.state.airports.values():
+            normal_capacity = float(
+                getattr(airport, "normal_arrival_capacity", airport.arrival_capacity)
+            )
+            if airport.arrival_capacity >= normal_capacity:
+                continue
+            active_inbound = [
+                flight
+                for flight in self.state.aircraft.values()
+                if flight.destination == airport.id
+                and flight.status not in {"LANDED", "CANCELLED"}
+            ]
+            if len(active_inbound) > airport.arrival_capacity:
+                for flight in active_inbound:
+                    if flight.status != "HOLDING":
+                        flight.delay_min += 0.25
 
     def _move_aircraft_one_minute(self, flight) -> None:
         if flight.status in {"LANDED", "CANCELLED"} or flight.route_index >= len(flight.route) - 1:
@@ -109,13 +143,19 @@ class DigitalTwinSimulator:
                 flight.status = "LANDED"
             return
 
-        # F102 is intentionally held at the decision point after degradation until
-        # the dispatcher-approved intervention is applied. This makes the 15–30 min
-        # decision window explicit and keeps candidate routes anchored at the current node.
+        target_flight_id = self.state.scenario.get("target_flight_id")
+        approval_times = [
+            int(event["t"])
+            for event in self.state.scenario.get("events", [])
+            if event.get("event") == "dispatcher_approval" and "t" in event
+        ]
+        decision_deadline = min(approval_times) if approval_times else -1
+        # Hold the scenario's target until its scheduled approval event, without
+        # coupling the simulator to a particular flagship flight identifier.
         if (
-            flight.id == "F102"
+            flight.id == target_flight_id
             and flight.status == "DEGRADED"
-            and 0 <= self.state.time_min <= 30
+            and self.state.time_min < decision_deadline
             and self.state.approved_intervention is None
         ):
             flight.fuel_remaining_min = max(0.0, flight.fuel_remaining_min - flight.burn_rate_min_per_min)
@@ -187,11 +227,17 @@ class DigitalTwinSimulator:
         bom = self.state.airports.get("BOM")
         if not bom:
             return
-        inbound = sum(1 for f in self.state.aircraft.values() if f.destination == "BOM" and f.status == "AIRBORNE")
+        active_inbound = [
+            flight
+            for flight in self.state.aircraft.values()
+            if flight.destination == "BOM"
+            and flight.status not in {"LANDED", "CANCELLED"}
+        ]
+        inbound = len(active_inbound)
         # The capacity is an hourly-ish abstraction represented as per active wave pressure.
         if self.state.time_min >= 8 and inbound > bom.arrival_capacity:
-            for f in self.state.aircraft.values():
-                if f.destination == "BOM" and f.status == "AIRBORNE":
+            for f in active_inbound:
+                if f.status != "HOLDING":
                     f.delay_min += 0.25
 
     def tick(self, apply_events: bool = True) -> WorldState:

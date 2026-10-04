@@ -24,6 +24,7 @@ class WorldState:
     graph: nx.DiGraph
     scenario: dict[str, Any]
     holding_flights: set[str] = field(default_factory=set)
+    holding_extra_fuel_burn: float = 0.75
     event_log: list[dict[str, Any]] = field(default_factory=list)
     approved_intervention: str | None = None
 
@@ -33,6 +34,8 @@ class WorldState:
     def snapshot(self) -> dict[str, Any]:
         return {
             "time_min": self.time_min,
+            "holding_flights": sorted(list(self.holding_flights)),
+            "holding_extra_fuel_burn": self.holding_extra_fuel_burn,
             "aircraft": [a.model_dump() for a in self.aircraft.values()],
             "sectors": [s.model_dump() for s in self.sectors.values()],
             "airports": [a.model_dump() for a in self.airports.values()],

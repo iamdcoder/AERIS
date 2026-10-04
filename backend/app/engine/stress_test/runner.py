@@ -21,10 +21,7 @@ def run_stress_test(state, candidate: dict) -> list[dict[str, Any]]:
         # Run simulation if route is valid to obtain operational metrics
         route_valid = validation.get("constraint_results", {}).get("route", {}).get("passed", True)
         if route_valid:
-            try:
-                simulation = simulate_candidate(scenario_state, candidate, horizon_min=20)
-            except Exception:
-                simulation = {}
+            simulation = simulate_candidate(scenario_state, candidate, horizon_min=20)
         else:
             simulation = {}
 

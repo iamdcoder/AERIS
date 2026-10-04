@@ -176,6 +176,20 @@ def test_each_flight_gets_one_congestion_increment_per_sector_per_minute():
     assert summary["congestion_delay_by_sector"]["S1"] == 4.5
 
 
+def test_overloaded_sector_without_occupants_does_not_delay_unrelated_flights():
+    state = _controlled_state(capacity=10, aircraft_count=3)
+    state.sectors["S2"].capacity = 1
+    state.sectors["S2"].forecast_traffic = 2
+    before = {flight_id: flight.delay_min for flight_id, flight in state.aircraft.items()}
+
+    summary = _advance_network(DigitalTwinSimulator(state), horizon_min=1)
+
+    assert all(flight.delay_min == before[flight_id] for flight_id, flight in state.aircraft.items())
+    assert summary["peak_overloaded_sectors"] == ["S2"]
+    assert summary["congestion_delay_by_sector"]["S2"] == 0.0
+    assert summary["affected_flight_ids"] == []
+
+
 def test_increasing_overload_does_not_reduce_congestion_delay():
     light_state = _controlled_state(capacity=2, aircraft_count=3)
     heavy_state = _controlled_state(capacity=1, aircraft_count=3)

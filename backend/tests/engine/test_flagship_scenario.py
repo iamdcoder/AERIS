@@ -21,6 +21,7 @@ def _score_at_decision_time() -> list[dict]:
     public.reset_engine()
     public.advance_simulation(19)
     candidates = public.generate_alternatives("F102")
+    public.begin_decision_context(["F102"], candidates)
     return public.score_candidates(candidates)
 
 
@@ -125,6 +126,18 @@ def test_flagship_stress_profiles_are_five_deterministic_and_numerically_distinc
     assert [item["scenario_id"] for item in by_id["ALT-D"]["stress_report"]["results"]] == [
         "F1", "F2", "F3", "F4", "F5"
     ]
+    stress_profiles = {profile["id"]: profile for profile in load_scenario()["stress_profiles"]}
+    assert "R-FUTURE-S6-01" in stress_profiles["F3"]["activate_restrictions"]
+    alt_b_f3 = next(
+        item for item in by_id["ALT-B"]["stress_report"]["results"]
+        if item["scenario_id"] == "F3"
+    )
+    alt_d_f3 = next(
+        item for item in by_id["ALT-D"]["stress_report"]["results"]
+        if item["scenario_id"] == "F3"
+    )
+    assert "HARD_CONSTRAINT: restriction" in alt_b_f3["failure_reasons"]
+    assert alt_d_f3["passed"] is True
 
     for candidate_id in feasible_ids:
         candidate = next(item for item in public._CANDIDATES.values()
@@ -152,6 +165,9 @@ def test_repeated_clean_flagship_runs_return_identical_candidate_metrics():
     first = _score_at_decision_time()
     second = _score_at_decision_time()
     assert first == second
+    assert [candidate["decision_context"]["snapshot_id"] for candidate in first] == [
+        candidate["decision_context"]["snapshot_id"] for candidate in second
+    ]
 
 
 def test_candidates_begin_at_f102_decision_position():
@@ -167,6 +183,24 @@ def test_alt_d_has_strongest_resilience_and_wins_engine_score():
     scored = _score_at_decision_time()
     by_id = {item["candidate_id"]: item for item in scored}
 
+    assert by_id["ALT-A"]["target_delay_min"] < by_id["ALT-D"]["target_delay_min"]
+    assert by_id["ALT-A"]["network_delay_delta_min"] > by_id["ALT-D"]["network_delay_delta_min"]
+    assert by_id["ALT-A"]["network_metrics"]["network_ripple_cost"] > by_id["ALT-D"]["network_metrics"]["network_ripple_cost"]
+    assert by_id["ALT-A"]["stress_survival"]["passed"] < by_id["ALT-D"]["stress_survival"]["passed"]
     assert by_id["ALT-D"]["resilience_metrics"]["future_robustness"] > by_id["ALT-A"]["resilience_metrics"]["future_robustness"]
     assert by_id["ALT-D"]["decision_score"] > by_id["ALT-A"]["decision_score"]
-    assert scored[0]["candidate_id"] == "ALT-D"
+    ranked_feasible = [candidate for candidate in scored if candidate["feasible"]]
+    assert scored[0]["candidate_id"] == ranked_feasible[0]["candidate_id"] == "ALT-D"
+    assert len({candidate["decision_context"]["snapshot_id"] for candidate in scored}) == 1
+    assert all(
+        candidate["decision_context"]["snapshot_id"] == candidate["decision_context_id"]
+        for candidate in scored
+    )
+    context_id = scored[0]["decision_context"]["snapshot_id"]
+    context_evidence = public.get_decision_context(context_id)["candidates"]
+    feasible_ids = {candidate_id for candidate_id, candidate in by_id.items() if candidate["feasible"]}
+    for candidate_id in feasible_ids:
+        evidence = context_evidence[candidate_id]
+        assert evidence["validation"] == by_id[candidate_id]["decision_context"]["validation"]
+        assert evidence["simulation"] == by_id[candidate_id]["decision_context"]["simulation"]
+        assert evidence["stress_report"] == by_id[candidate_id]["decision_context"]["stress_report"]

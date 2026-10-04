@@ -25,7 +25,7 @@
   "stress_profiles":[
     {"id":"F1","name":"Weather expansion +10%","weather_expand_factor":1.10},
     {"id":"F2","name":"Weather expansion +20%","weather_expand_factor":1.20},
-    {"id":"F3","name":"S6 capacity -15%","sector_capacity_factor":{"S6":0.85}},
+    {"id":"F3","name":"S6 capacity -15% with future bypass restriction","sector_capacity_factor":{"S6":0.85},"activate_restrictions":["R-FUTURE-S6-01"]},
     {"id":"F4","name":"Traffic demand +15%","traffic_factor":1.15},
     {"id":"F5","name":"BOM acceptance -20%","airport_capacity_factor":{"BOM":0.80}}
   ]
