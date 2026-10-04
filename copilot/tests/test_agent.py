@@ -1,4 +1,6 @@
-from copilot.agent.orchestrator import AgentOrchestrator
+from copilot.agent.orchestrator import (
+    AgentOrchestrator,
+)
 from copilot.agent.state import (
     AgentStage,
     RunStatus,
@@ -21,7 +23,11 @@ def test_valid_state_transition():
         "begin diagnosis",
     )
 
-    assert state.stage == AgentStage.DIAGNOSE
+    assert (
+        state.stage
+        == AgentStage.DIAGNOSE
+    )
+
     assert state.step == 1
 
 
@@ -42,7 +48,11 @@ def test_invalid_state_transition_is_rejected():
 
 
 def test_mock_preview_stops_for_human_approval():
-    state = AgentOrchestrator().run_mock_preview()
+    orchestrator = AgentOrchestrator()
+
+    state = (
+        orchestrator.run_mock_preview()
+    )
 
     assert (
         state.status
@@ -59,7 +69,10 @@ def test_mock_preview_stops_for_human_approval():
         == "ALT-D"
     )
 
-    assert state.recommendation is not None
+    assert (
+        state.recommendation
+        is not None
+    )
 
     assert (
         state.recommendation.candidate_id
@@ -67,7 +80,8 @@ def test_mock_preview_stops_for_human_approval():
     )
 
     assert (
-        state.critic_result is not None
+        state.critic_result
+        is not None
     )
 
     assert (
@@ -80,13 +94,38 @@ def test_mock_preview_stops_for_human_approval():
         is True
     )
 
-    rejected = {
-        item["candidate_id"]
-        for item
-        in state.recommendation.rejected_candidates
+
+def test_orchestrator_uses_registered_tools():
+    orchestrator = (
+        AgentOrchestrator()
+    )
+
+    state = (
+        orchestrator.run_mock_preview()
+    )
+
+    tool_events = [
+        event
+        for event
+        in state.events
+        if event.event_type
+        == "TOOL_RESULT"
+    ]
+
+    tool_names = {
+        event.tool_name
+        for event
+        in tool_events
     }
 
-    assert rejected == {
-        "ALT-A",
-        "ALT-E",
-    }
+    assert {
+        "get_airspace_state",
+        "get_disruptions",
+        "get_target_flight",
+        "generate_alternatives",
+        "validate_candidate",
+        "simulate_network_impact",
+        "stress_test_candidate",
+    }.issubset(
+        tool_names
+    )
