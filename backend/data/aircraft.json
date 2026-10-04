@@ -127,17 +127,20 @@
     },
     {
       "prefix": "AI8",
-      "start_node": "W8",
+      "start_node": "W4",
       "route": [
+        "W4",
+        "W5",
+        "W6",
         "W8",
         "W11",
         "W12",
         "BOM"
       ],
       "destination": "BOM",
-      "speed_kt": 445,
+      "speed_kt": 415,
       "altitude_ft": 32000,
-      "fuel_remaining_min": 42,
+      "fuel_remaining_min": 55,
       "burn_rate_min_per_min": 0.9
     },
     {

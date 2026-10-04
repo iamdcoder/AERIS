@@ -60,7 +60,23 @@ class DigitalTwinSimulator:
             self.state.airports["BOM"].weather_status = "SEVERE_CONVECTIVE"
 
         elif name == "holding_begins":
-            self.state.holding_flights.update(payload.get("affected_flights", []))
+            affected = payload.get("affected_flights", [])
+            self.state.holding_flights.update(affected)
+            self.state.holding_extra_fuel_burn = float(payload.get("extra_fuel_burn_per_min", 0.75))
+            for fid in affected:
+                if fid in self.state.aircraft:
+                    f = self.state.aircraft[fid]
+                    if f.status in ("AIRBORNE", "DEGRADED"):
+                        f.status = "HOLDING"
+
+        elif name == "holding_ends":
+            affected = payload.get("affected_flights", list(self.state.holding_flights))
+            for fid in affected:
+                self.state.holding_flights.discard(fid)
+                if fid in self.state.aircraft:
+                    f = self.state.aircraft[fid]
+                    if f.status == "HOLDING":
+                        f.status = "AIRBORNE"
 
         elif name == "bypass_sector_approaches_capacity":
             sector = self.state.sectors[payload["sector_id"]]
@@ -106,6 +122,15 @@ class DigitalTwinSimulator:
             flight.delay_min += 0.60
             return
 
+        # Explicit holding logic: holding aircraft halt route progression, burn configured extra fuel, and accumulate delay.
+        if flight.status == "HOLDING" or flight.id in self.state.holding_flights:
+            flight.status = "HOLDING"
+            extra_burn = getattr(self.state, "holding_extra_fuel_burn", 0.75)
+            burn = flight.burn_rate_min_per_min + extra_burn
+            flight.fuel_remaining_min = max(0.0, flight.fuel_remaining_min - burn)
+            flight.delay_min += 1.0
+            return
+
         # 1 simulation minute advances a proportional fraction of the current edge.
         current = flight.route[flight.route_index]
         nxt = flight.route[flight.route_index + 1]
@@ -128,8 +153,6 @@ class DigitalTwinSimulator:
             flight.position.lon = a["lon"] + (b["lon"] - a["lon"]) * fraction
 
         burn = flight.burn_rate_min_per_min
-        if flight.id in self.state.holding_flights and self.state.time_min >= 10:
-            burn += 0.75
         flight.fuel_remaining_min = max(0.0, flight.fuel_remaining_min - burn)
 
     def _move_weather_one_minute(self) -> None:

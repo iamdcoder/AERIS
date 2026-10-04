@@ -91,4 +91,17 @@ def perturb_state(state, profile: dict):
                 old_cap = new_state.airports[aid].arrival_capacity
                 new_state.airports[aid].arrival_capacity = max(1, int(round(old_cap * factor)))
 
+    if "activate_restrictions" in profile:
+        # Support activating new/future temporary restrictions absent in the base world.
+        restriction_ids = profile["activate_restrictions"]
+        if not isinstance(restriction_ids, list):
+            raise ValueError("activate_restrictions must be a list of restriction_id strings")
+        for rid in restriction_ids:
+            if not isinstance(rid, str):
+                raise ValueError(f"activate_restrictions entries must be strings, got {rid!r}")
+            if rid in new_state.restrictions:
+                new_state.restrictions[rid].active = True
+            # If the restriction doesn't exist in this world snapshot, silently skip —
+            # it may be a future restriction that isn't loaded in the base dataset.
+
     return new_state

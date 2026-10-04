@@ -43,7 +43,6 @@ from app.engine import public  # noqa: E402 — path manipulation above is inten
 # ─────────────────────────────────────────────────────────────────────────────
 SCENARIO_ID = "mumbai_weather_crisis_v2"
 TARGET_FLIGHT = "F102"
-PREFERRED_CANDIDATE = "ALT-D"          # scenario t=28: recommend_resilient_option
 EXPECTED_REJECTED = {"ALT-C", "ALT-E"} # scenario t=19: 2_candidates_expected_rejected
 TOTAL_CANDIDATES = 5
 STRESS_PROFILE_COUNT = 5               # scenario t=24: stress_test_3_futures → 5 profiles
@@ -266,6 +265,7 @@ def _run_restriction(current_t: int) -> tuple[dict, int]:
 def _run_validate(candidates: list[dict], current_t: int) -> tuple[dict[str, dict], list[dict], int]:
     state = _advance_to(T_VALIDATE, current_t)
     current_t = state["time_min"]
+    decision_context = public.begin_decision_context([TARGET_FLIGHT], candidates)
 
     validation_results: dict[str, dict] = {}
     for c in candidates:
@@ -275,6 +275,7 @@ def _run_validate(candidates: list[dict], current_t: int) -> tuple[dict[str, dic
     rejected = [c["candidate_id"] for c in candidates if not validation_results[c["candidate_id"]]["feasible"]]
 
     _section(T_VALIDATE, "HARD CONSTRAINT VALIDATION")
+    _line(f"Decision snapshot: {decision_context['snapshot_id']} at T+{decision_context['decision_time']}")
     for c in candidates:
         cid = c["candidate_id"]
         r = validation_results[cid]
@@ -319,11 +320,11 @@ def _run_evaluate(feasible_candidates: list[dict], current_t: int) -> tuple[dict
     for c in feasible_candidates:
         sim_results[c["candidate_id"]] = public.simulate_candidate(c)
 
-    _section(T_EVALUATE, "NETWORK SIMULATION (feasible candidates)")
+    _section(T_EVALUATE, f"FROZEN DECISION SIMULATION (snapshot T+{sim_results[next(iter(sim_results))].get('decision_time', T_VALIDATE) if sim_results else T_VALIDATE})")
     for cid, sim in sim_results.items():
         _line(
-            f"  {cid}: target_delay=+{sim['target_delay_delta_min']:.2f} min  "
-            f"network_delta=+{sim['network_delay_delta_min']:.2f} min  "
+            f"  {cid}: target_delay={sim['target_delay_delta_min']:+.2f} min  "
+            f"network_delta={sim['network_delay_delta_min']:+.2f} min  "
             f"affected={sim['affected_flights']}"
         )
 
@@ -338,7 +339,7 @@ def _run_stress(feasible_candidates: list[dict], current_t: int) -> tuple[dict[s
     for c in feasible_candidates:
         stress_results[c["candidate_id"]] = public.stress_test_candidate(c)
 
-    _section(T_STRESS, "STRESS TEST (5 future scenarios)")
+    _section(T_STRESS, "FROZEN DECISION STRESS TEST (5 future scenarios)")
     for cid, sr in stress_results.items():
         survival = f"{sr['passed']}/{sr['total']}"
         pct = sr.get("survival_pct", 0.0)
@@ -365,9 +366,12 @@ def _run_score_and_critic(
 
     scored = public.score_candidates(candidates)
 
-    _section(T_CRITIC, "CRITIC STAGE")
-    top = scored[0]
-    runner_up = scored[1] if len(scored) > 1 else None
+    _section(T_CRITIC, f"CRITIC / FROZEN DECISION SCORE (snapshot T+{scored[0]['decision_context']['decision_time'] if scored else T_VALIDATE})")
+    ranked_feasible = [item for item in scored if item.get("feasible") is True]
+    if not ranked_feasible:
+        raise FlagshipAssertionError("No feasible candidate received a decision score")
+    top = ranked_feasible[0]
+    runner_up = ranked_feasible[1] if len(ranked_feasible) > 1 else None
     _line(f"Preliminary leader: {top['candidate_id']}  (score={top['decision_score']:.3f})")
     if runner_up:
         _line(f"Challenger        : {runner_up['candidate_id']}  (score={runner_up['decision_score']:.3f})")
@@ -383,14 +387,11 @@ def _run_score_and_critic(
 
 
 def _select_recommendation(scored: list[dict]) -> dict:
-    """Pick the recommended candidate.
-
-    Prefer the scenario-specified ALT-D if it is feasible and scored.
-    Fall back to the highest-scoring feasible candidate otherwise.
-    """
-    scored_by_id = {c["candidate_id"]: c for c in scored if c.get("feasible")}
-    preferred = scored_by_id.get(PREFERRED_CANDIDATE)
-    return preferred if preferred else scored[0]
+    """Recommend the top engine-ranked feasible candidate, with no overrides."""
+    feasible = [candidate for candidate in scored if candidate.get("feasible") is True]
+    if not feasible:
+        raise FlagshipAssertionError("No feasible candidate can be recommended")
+    return feasible[0]
 
 
 def _run_recommend_and_approve(
@@ -411,6 +412,11 @@ def _run_recommend_and_approve(
 
     recommendation = _select_recommendation(scored)
     recommended_id = recommendation["candidate_id"]
+    top_engine_candidate = _select_recommendation(scored)
+    _assert(
+        recommended_id == top_engine_candidate["candidate_id"],
+        "Recommendation must equal the highest-scoring feasible candidate",
+    )
 
     _section(T_RECOMMEND, "RECOMMENDATION")
     _line(f"Selected  : {recommended_id}")
@@ -418,7 +424,7 @@ def _run_recommend_and_approve(
     stress = recommendation.get("stress_survival", {})
     _line(f"Resilience: {stress.get('passed', 0)}/{stress.get('total', STRESS_PROFILE_COUNT)} "
           "stress scenarios survived")
-    _line(f"Target Δ  : +{recommendation.get('target_delay_min', 0):.2f} min")
+    _line(f"Target Δ  : {recommendation.get('target_delay_min', 0):+.2f} min")
     network_delta = recommendation.get("network_delay_delta_min", 0)
     _line(f"Network Δ : {network_delta:+.2f} min")
     reintervention = recommendation.get("reintervention_probability", 0)
@@ -562,10 +568,16 @@ def run_flagship(*, verbose_json: bool = False) -> dict:
 
     # ── Final result ──────────────────────────────────────────
     top = next((c for c in scored if c["candidate_id"] == recommended_id), scored[0])
+    top_engine_ranked_candidate = _select_recommendation(scored)["candidate_id"]
+    _assert(
+        recommended_id == top_engine_ranked_candidate,
+        "Flagship winner differs from the top engine-ranked feasible candidate",
+    )
     final_result = {
         "scenario_id": SCENARIO_ID,
         "target_flight": TARGET_FLIGHT,
         "recommendation": recommended_id,
+        "top_engine_ranked_candidate": top_engine_ranked_candidate,
         "verification_status": ver_result["status"],
         "decision_score": round(top.get("decision_score", 0.0), 4),
         "target_delay_delta_min": round(top.get("target_delay_min", 0.0), 2),
@@ -577,11 +589,8 @@ def run_flagship(*, verbose_json: bool = False) -> dict:
         "candidates_feasible": len(feasible_candidates),
         "apply_status": apply_result["status"],
         "final_time_min": current_t,
-        "flagship_result": (
-            "SUCCESS"
-            if ver_result["status"] in ("VERIFIED", "REASSESSMENT_REQUIRED")
-            else "FAILED"
-        ),
+        "decision_context": top.get("decision_context"),
+        "flagship_result": "SUCCESS" if ver_result["status"] == "VERIFIED" else "FAILED",
     }
 
     # ── Print final summary ───────────────────────────────────

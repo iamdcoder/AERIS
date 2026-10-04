@@ -176,6 +176,8 @@ def test_simulation_is_deterministic():
         assert sim_a.advance(cp).snapshot() == sim_b.advance(cp).snapshot()
 
 
+
+
 def test_flagship_reaches_end_of_scenario():
     sim = DigitalTwinSimulator(load_world())
     sim.advance(35)
@@ -184,3 +186,115 @@ def test_flagship_reaches_end_of_scenario():
     assert "F102" in sim.state.aircraft
     event_names = [event["event"] for event in sim.state.event_log]
     assert "continue_monitoring" in event_names
+
+
+# ===========================================================================
+# HOLDING STATE SEMANTICS (Part 1 / 2)
+# ===========================================================================
+
+def test_holding_aircraft_has_status_holding_after_t10():
+    """Aircraft in the holding_begins payload should have status HOLDING after t=10."""
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(10)
+    for fid in {"AI2-01", "AI3-01", "AI5-01", "AI8-01"}:
+        assert sim.state.aircraft[fid].status == "HOLDING", (
+            f"{fid} expected HOLDING, got {sim.state.aircraft[fid].status}"
+        )
+
+
+def test_holding_aircraft_route_index_does_not_advance():
+    """HOLDING aircraft must not advance their route_index — they stay at the same waypoint."""
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(10)
+    flight = sim.state.aircraft["AI2-01"]
+    idx_at_10 = flight.route_index
+
+    sim.advance(5)
+    assert flight.route_index == idx_at_10, (
+        f"route_index advanced during hold: {idx_at_10} -> {flight.route_index}"
+    )
+
+
+def test_holding_aircraft_accumulates_delay_at_1_min_per_min():
+    """Each simulation minute in HOLDING adds exactly 1.0 min to delay_min."""
+    import pytest
+
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(10)
+    flight = sim.state.aircraft["AI2-01"]
+    delay_at_10 = flight.delay_min
+
+    sim.advance(3)
+    assert flight.delay_min == pytest.approx(delay_at_10 + 3.0)
+
+
+def test_holding_aircraft_burns_extra_fuel():
+    """HOLDING aircraft consume base burn_rate + configured extra_fuel_burn_per_min per minute."""
+    import pytest
+
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(10)
+    flight = sim.state.aircraft["AI2-01"]
+    fuel_at_10 = flight.fuel_remaining_min
+    # Scenario configures extra_fuel_burn_per_min = 0.75
+    expected_total_burn = (flight.burn_rate_min_per_min + 0.75) * 3
+
+    sim.advance(3)
+    assert flight.fuel_remaining_min == pytest.approx(fuel_at_10 - expected_total_burn)
+
+
+def test_holding_ends_transitions_aircraft_back_to_airborne():
+    """After holding_ends (scenario has no explicit end event, so manually trigger via state)."""
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(10)
+    fid = "AI2-01"
+    assert sim.state.aircraft[fid].status == "HOLDING"
+
+    # Manually trigger holding_ends for this flight.
+    sim._apply_event({"event": "holding_ends", "payload": {"affected_flights": [fid]}})
+    assert sim.state.aircraft[fid].status == "AIRBORNE"
+    assert fid not in sim.state.holding_flights
+
+
+# ===========================================================================
+# AIRCRAFT PERFORMANCE ENVELOPE (Part 3)
+# ===========================================================================
+
+def test_degraded_f102_rejected_at_high_altitude_candidate():
+    """A degraded aircraft should fail a candidate with cruise altitude > 33,000 ft."""
+    from app.engine.constraints.performance import performance_check
+
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(15)
+    flight = sim.state.aircraft["F102"]
+    assert flight.status == "DEGRADED"
+
+    result = performance_check(sim.state, flight, cruise_altitude_ft=39000, speed_kt=430)
+    assert result["passed"] is False
+    assert "33000" in result["violation_reason"]
+
+
+def test_degraded_f102_passes_at_low_altitude_candidate():
+    """A degraded aircraft should pass a candidate at or below the degraded ceiling."""
+    from app.engine.constraints.performance import performance_check
+
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(15)
+    flight = sim.state.aircraft["F102"]
+    assert flight.status == "DEGRADED"
+
+    result = performance_check(sim.state, flight, cruise_altitude_ft=33000, speed_kt=430)
+    assert result["passed"] is True
+
+
+def test_normal_aircraft_passes_standard_altitude():
+    """A healthy aircraft should pass a standard FL390 altitude candidate."""
+    from app.engine.constraints.performance import performance_check
+
+    state = load_world()
+    flight = state.aircraft["F102"]
+    # At t=0, F102 is AIRBORNE not DEGRADED.
+    assert flight.status != "DEGRADED"
+
+    result = performance_check(state, flight, cruise_altitude_ft=39000, speed_kt=430)
+    assert result["passed"] is True

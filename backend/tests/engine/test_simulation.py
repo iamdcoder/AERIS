@@ -121,9 +121,10 @@ def test_baseline_and_candidate_use_independent_cloned_states(monkeypatch):
     original_advance = network_module._advance_network
     observed = []
 
-    def capture(simulator, horizon_min):
-        observed.append((simulator.state, simulator.state.graph, simulator.state.aircraft["F102"].route.copy()))
-        return original_advance(simulator, horizon_min)
+    def capture(simulator, horizon_min, *args, **kwargs):
+        st_copy = deepcopy(simulator.state)
+        observed.append((st_copy, st_copy.graph, st_copy.aircraft["F102"].route.copy()))
+        return original_advance(simulator, horizon_min, *args, **kwargs)
 
     monkeypatch.setattr(network_module, "_advance_network", capture)
     simulate_candidate(state, candidate, horizon_min=1)

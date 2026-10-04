@@ -4,6 +4,7 @@ from ..routes.graph import route_is_valid
 from .capacity import capacity_check
 from .conflict import conflict_check
 from .fuel import fuel_feasibility
+from .performance import performance_check
 from .restriction import restriction_check
 from .weather import weather_intersection
 
@@ -19,10 +20,11 @@ def validate_candidate(state, candidate: dict) -> dict:
     results = {
         "route": {"passed": valid, "error": route_error},
         "weather": weather_intersection(state, route) if valid else {"passed": False},
-        "fuel": fuel_feasibility(state, flight, route, speed) if valid else {"feasible": False},
+        "fuel": fuel_feasibility(state, flight, route, speed, altitude) if valid else {"feasible": False},
         "capacity": capacity_check(state, route) if valid else {"passed": False},
         "conflict": conflict_check(state, flight_id, route, speed) if valid else {"passed": False},
         "restriction": restriction_check(state, route, altitude) if valid else {"passed": False},
+        "performance": performance_check(state, flight, altitude, speed) if valid else {"passed": False},
     }
 
     hard_failures = []
@@ -40,6 +42,8 @@ def validate_candidate(state, candidate: dict) -> dict:
         hard_failures.append(results["conflict"].get("violation_reason", "Conflict constraint failed"))
     if not results["restriction"].get("passed", False):
         hard_failures.append(results["restriction"].get("violation_reason", "Restriction violation"))
+    if not results["performance"].get("passed", True):
+        hard_failures.append(results["performance"].get("violation_reason", "Performance constraint failed"))
 
     # Weather is deliberately a risk signal rather than an automatic hard reject in this scenario.
     passed = len(hard_failures) == 0

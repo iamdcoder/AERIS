@@ -13,10 +13,13 @@ individual engine subsystems (those are covered in tests/engine/).
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import inspect
 
 import pytest
 
 from app.engine import public
+from scripts.run_flagship import run_flagship
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -465,3 +468,16 @@ def test_two_runs_produce_identical_decisions():
     assert result_a == result_b, (
         f"Engine is non-deterministic!\nRun 1: {result_a}\nRun 2: {result_b}"
     )
+
+
+def test_flagship_runner_uses_top_engine_score_and_requires_verified_success():
+    result = run_flagship()
+
+    assert result["recommendation"] == result["top_engine_ranked_candidate"]
+    assert result["recommendation"] == "ALT-D"
+    assert result["verification_status"] == "VERIFIED"
+    assert result["apply_status"] == "EXECUTING"
+    assert result["flagship_result"] == "SUCCESS"
+    assert result["decision_context"]["decision_time"] == 19
+    runner_source = Path(inspect.getsourcefile(run_flagship)).read_text(encoding="utf-8")
+    assert "PREFERRED_CANDIDATE" not in runner_source

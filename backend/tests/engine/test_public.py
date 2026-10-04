@@ -136,6 +136,111 @@ def test_score_candidates_enriches_sorts_and_stores_results():
         assert "simulation" in candidate or candidate["decision_score"] == 0.0
 
 
+def test_decision_context_freezes_snapshot_and_score_against_live_world_drift():
+    public.advance_simulation(19)
+    candidates = public.generate_alternatives("F102")
+    decision = public.begin_decision_context(["F102"], candidates)
+    assert decision["decision_time"] == 19
+    snapshot_id = decision["snapshot_id"]
+
+    for candidate in candidates:
+        validation = public.validate_candidate(candidate)
+        if validation["feasible"]:
+            public.simulate_candidate(candidate)
+            public.stress_test_candidate(candidate)
+
+    frozen_before = public.get_decision_context(snapshot_id)
+    returned_snapshot = frozen_before["snapshot"]
+    returned_snapshot["time_min"] = -1
+    assert public.get_decision_context(snapshot_id)["snapshot"]["time_min"] == 19
+
+    scores_without_live_advance = public.score_candidates(candidates)
+    public.advance_simulation(7)
+    scores_after_live_advance = public.score_candidates(candidates)
+
+    assert scores_after_live_advance == scores_without_live_advance
+    for candidate in scores_after_live_advance:
+        assert candidate["decision_context"]["decision_time"] == 19
+        assert candidate["decision_context"]["snapshot_id"] == snapshot_id
+        assert "validation" in candidate["decision_context"]
+        if candidate["feasible"]:
+            assert "simulation" in candidate["decision_context"]
+            assert "stress_report" in candidate["decision_context"]
+
+
+def test_score_tie_breaking_is_repeatable_and_uses_ripple_fuel_order(monkeypatch):
+    candidates = public.generate_alternatives("F102")
+    public.begin_decision_context(["F102"], candidates)
+
+    def validation(state, candidate):
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "flight_id": candidate["flight_id"],
+            "feasible": True,
+            "constraint_results": {
+                "fuel": {"feasible": True, "reserve_margin_min": {"ALT-A": 10, "ALT-B": 20, "ALT-C": 10, "ALT-D": 5, "ALT-E": 5}[candidate["candidate_id"]]},
+            },
+            "rejection_reasons": [],
+            "weather_risk": "NONE",
+        }
+
+    monkeypatch.setattr(public, "_validate_candidate", validation)
+    monkeypatch.setattr(
+        public,
+        "_simulate_candidate",
+        lambda state, candidate, horizon_min: {
+            "candidate_id": candidate["candidate_id"],
+            "target_delay_delta_min": 0.0,
+            "affected_flights": 0,
+            "network_delay_delta_min": 0.0,
+            "cascade_indicators": {"max_sector_utilization_pct": 0.0},
+        },
+    )
+    monkeypatch.setattr(
+        public,
+        "run_stress_test",
+        lambda state, candidate: [{"passed": True} for _ in range(5)],
+    )
+    monkeypatch.setattr(
+        public,
+        "network_impact_metrics",
+        lambda result: {"network_ripple_cost": {"ALT-A": 1, "ALT-B": 1, "ALT-C": 0, "ALT-D": 2, "ALT-E": 2}[result["candidate_id"]]},
+    )
+    monkeypatch.setattr(
+        public,
+        "resilience_metrics",
+        lambda stress, simulation: {"future_robustness": 1.0, "reintervention_probability": 0.0, "regret": 0.0},
+    )
+    monkeypatch.setattr(public, "score_candidate", lambda network, fuel, resilience: 0.5)
+
+    first = public.score_candidates(candidates)
+    second = public.score_candidates(candidates)
+    assert [item["candidate_id"] for item in first] == ["ALT-C", "ALT-B", "ALT-A", "ALT-D", "ALT-E"]
+    assert [item["candidate_id"] for item in second] == [item["candidate_id"] for item in first]
+
+
+def test_scoring_never_ranks_infeasible_candidate_above_feasible(monkeypatch):
+    candidates = public.generate_alternatives("F102")
+    public.begin_decision_context(["F102"], candidates)
+    def validate(state, candidate):
+        return {
+            **_feasible_validation(candidate),
+            "feasible": candidate["candidate_id"] == "ALT-E",
+            "constraint_results": {"fuel": {"feasible": candidate["candidate_id"] == "ALT-E", "reserve_margin_min": 0.0}},
+            "rejection_reasons": [] if candidate["candidate_id"] == "ALT-E" else ["infeasible"],
+        }
+    monkeypatch.setattr(public, "_validate_candidate", validate)
+    monkeypatch.setattr(public, "_simulate_candidate", lambda state, candidate, horizon_min: {"candidate_id": candidate["candidate_id"], "target_delay_delta_min": 0.0, "affected_flights": 0, "network_delay_delta_min": 0.0, "cascade_indicators": {"max_sector_utilization_pct": 0.0}})
+    monkeypatch.setattr(public, "run_stress_test", lambda state, candidate: [{"passed": True}])
+    monkeypatch.setattr(public, "network_impact_metrics", lambda result: {"network_ripple_cost": 0.0})
+    monkeypatch.setattr(public, "resilience_metrics", lambda stress, simulation: {"future_robustness": 1.0, "reintervention_probability": 0.0, "regret": 0.0})
+    monkeypatch.setattr(public, "score_candidate", lambda network, fuel, resilience: 0.0)
+
+    scored = public.score_candidates(candidates)
+    assert scored[0]["candidate_id"] == "ALT-E"
+    assert all(item["decision_score"] == 0.0 for item in scored)
+
+
 def test_infeasible_candidate_is_stored_with_zero_score(monkeypatch):
     candidate = _candidate()
     monkeypatch.setattr(
@@ -263,6 +368,48 @@ def test_verify_returns_contract_fields_with_integer_affected_count(monkeypatch)
     }.issubset(result)
     assert isinstance(result["affected_flights"], int)
     json.dumps(result)
+
+
+def test_verification_checks_executed_remaining_route_and_same_time_counterfactual():
+    public.advance_simulation(19)
+    candidates = public.generate_alternatives("F102")
+    public.begin_decision_context(["F102"], candidates)
+    scored = public.score_candidates(candidates)
+    winner = next(item for item in scored if item["feasible"])
+    historical = public.get_decision_context(winner["decision_context"]["snapshot_id"])
+
+    assert public.apply_intervention(winner["candidate_id"])["status"] == "EXECUTING"
+    assert public.get_decision_context(winner["decision_context"]["snapshot_id"]) == historical
+    public.advance_simulation(4)
+
+    result = public.verify_state(winner["candidate_id"])
+    target = public._engine().state.aircraft["F102"]
+    assert result["verified_at_min"] == public._engine().state.time_min
+    assert result["counterfactual_time_min"] == result["verified_at_min"]
+    assert result["actual_route"] == target.route[target.route_index :]
+    assert result["remaining_fuel_min"] == target.fuel_remaining_min
+    assert result["status"] == "VERIFIED"
+
+
+def test_post_apply_violation_requires_deterministic_reassessment():
+    def run_once():
+        public.reset_engine()
+        public.advance_simulation(19)
+        candidates = public.generate_alternatives("F102")
+        public.begin_decision_context(["F102"], candidates)
+        scored = public.score_candidates(candidates)
+        winner = next(item for item in scored if item["feasible"])
+        public.apply_intervention(winner["candidate_id"])
+        public.advance_simulation(2)
+        public._engine().state.aircraft["F102"].fuel_remaining_min = 0.0
+        return public.verify_state(winner["candidate_id"])
+
+    first = run_once()
+    second = run_once()
+    assert first == second
+    assert first["status"] == "REASSESSMENT_REQUIRED"
+    assert first["reassessment_required"] is True
+    assert first["constraints_safe"] is False
 
 
 def test_verification_is_deterministic_for_equivalent_states(monkeypatch):

@@ -3,6 +3,7 @@ import math
 import pytest
 from shapely.geometry import Polygon
 
+from app.engine.constraints.capacity import capacity_check
 from app.engine.digital_twin.loaders import load_world
 from app.engine.digital_twin.simulator import DigitalTwinSimulator
 from app.engine.routes.generator import generate_candidate_routes
@@ -278,3 +279,136 @@ def test_five_stress_scenarios_preserved_even_on_failures():
     candidate = generate_candidate_routes(sim.state.graph, "F102")[0]
     results = run_stress_test(sim.state, candidate)
     assert len(results) == 5
+
+
+# ===========================================================================
+# PART 7: TEMPORARY / NEW RESTRICTION ACTIVATION PERTURBATION
+# ===========================================================================
+
+def test_perturb_state_activate_restrictions_sets_restriction_active():
+    """activate_restrictions perturbation should mark listed restrictions as active."""
+    state = load_world()
+    assert state.restrictions["R-MONSOON-01"].active is False
+
+    profile = {"activate_restrictions": ["R-MONSOON-01"]}
+    perturbed = perturb_state(state, profile)
+
+    assert perturbed.restrictions["R-MONSOON-01"].active is True
+
+
+def test_perturb_state_activate_restrictions_does_not_mutate_original():
+    """Original state should remain unchanged after restriction activation."""
+    state = load_world()
+    snap_before = state.snapshot()
+
+    profile = {"activate_restrictions": ["R-MONSOON-01"]}
+    perturb_state(state, profile)
+
+    assert state.snapshot() == snap_before
+
+
+def test_perturb_state_activate_unknown_restriction_is_silently_skipped():
+    """Activating a restriction that doesn't exist in the world should not raise."""
+    state = load_world()
+    profile = {"activate_restrictions": ["DOES-NOT-EXIST"]}
+    perturbed = perturb_state(state, profile)  # should not raise
+    assert perturbed is not state
+
+
+def test_perturb_state_activate_restrictions_rejects_non_list():
+    """activate_restrictions must be a list; a non-list value should raise ValueError."""
+    state = load_world()
+    with pytest.raises(ValueError, match="list"):
+        perturb_state(state, {"activate_restrictions": "R-MONSOON-01"})
+
+
+def test_perturb_state_activate_restrictions_rejects_non_string_entries():
+    """Each restriction ID in activate_restrictions must be a string."""
+    state = load_world()
+    with pytest.raises(ValueError):
+        perturb_state(state, {"activate_restrictions": [123]})
+
+
+def test_perturb_state_activate_restrictions_combined_with_weather_expansion():
+    """activate_restrictions should compose cleanly with weather_expand_factor."""
+    state = load_world()
+    profile = {
+        "weather_expand_factor": 1.10,
+        "activate_restrictions": ["R-MONSOON-01"],
+    }
+    perturbed = perturb_state(state, profile)
+
+    # Restriction activated.
+    assert perturbed.restrictions["R-MONSOON-01"].active is True
+    # Weather expanded.
+    from shapely.geometry import Polygon
+    before = Polygon(state.weather_cells["WX-BOM-01"].geometry["coordinates"][0])
+    after = Polygon(perturbed.weather_cells["WX-BOM-01"].geometry["coordinates"][0])
+    assert after.area > before.area
+
+
+def test_active_restriction_in_perturbed_state_causes_constraint_violation():
+    """A candidate overlapping R-MONSOON-01's region should fail restriction_check
+    when that restriction is activated via perturb_state."""
+    from app.engine.constraints.restriction import restriction_check
+
+    state = load_world()
+    profile = {"activate_restrictions": ["R-MONSOON-01"]}
+    perturbed = perturb_state(state, profile)
+
+    # R-MONSOON-01 covers the high-altitude approach corridor used by ALT-C.
+    route = ["W0", "W4", "W5", "W10", "W11", "W12", "BOM"]
+    result_base = restriction_check(state, route, altitude_ft=34000)
+    result_perturbed = restriction_check(perturbed, route, altitude_ft=34000)
+
+    # Base state: restriction not active → passes.
+    assert result_base["passed"] is True
+    # Perturbed state: restriction active → fails.
+    assert result_perturbed["passed"] is False
+    assert result_perturbed["violations"][0]["restriction_id"] == "R-MONSOON-01"
+
+
+# ===========================================================================
+# PART 8: DETERMINISM AND IMMUTABILITY INVARIANTS
+# ===========================================================================
+
+def test_capacity_check_is_deterministic():
+    """capacity_check must return identical results for identical inputs."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    r1 = capacity_check(state, route)
+    r2 = capacity_check(state, route)
+    assert r1 == r2
+
+
+def test_conflict_check_is_deterministic():
+    """conflict_check must return identical results for identical inputs."""
+    from app.engine.constraints.conflict import conflict_check
+
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    speed = state.aircraft["F102"].speed_kt
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(route)
+    other.route_index = 0
+    other.edge_progress_min = 0.0
+    other.status = "AIRBORNE"
+    other.speed_kt = speed
+
+    r1 = conflict_check(state, "F102", route, speed)
+    r2 = conflict_check(state, "F102", route, speed)
+    assert r1 == r2
+
+
+def test_perturb_state_produces_independent_clones():
+    """Each call to perturb_state should produce a fully independent world clone."""
+    state = load_world()
+    profile = {"weather_expand_factor": 1.10}
+    p1 = perturb_state(state, profile)
+    p2 = perturb_state(state, profile)
+
+    # Mutating p1 should not affect p2.
+    p1.airports["BOM"].arrival_capacity = 999
+    assert p2.airports["BOM"].arrival_capacity != 999
+    assert state.airports["BOM"].arrival_capacity != 999

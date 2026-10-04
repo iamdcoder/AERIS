@@ -207,18 +207,21 @@ def test_conflict_constraint_detects_same_waypoint_time_conflict():
 
 
 # TEST 17 — VALIDATOR: FLAGSHIP HARD CONSTRAINT RESULT
-def test_flagship_has_expected_two_hard_failures_at_19():
+def test_flagship_restriction_failure_and_reanchored_conservative_fuel_at_19():
     sim = DigitalTwinSimulator(load_world())
     sim.advance(19)
     candidates = generate_candidate_routes(sim.state.graph, "F102")
     results = {c["candidate_id"]: validate_candidate(sim.state, c) for c in candidates}
     assert results["ALT-C"]["feasible"] is False
     assert results["ALT-E"]["feasible"] is False
+    assert results["ALT-E"]["constraint_results"]["fuel"]["feasible"] is False
+    assert candidates[-1]["route"][0] == sim.state.aircraft["F102"].route[
+        sim.state.aircraft["F102"].route_index
+    ]
     assert results["ALT-A"]["feasible"] is True
     assert results["ALT-B"]["feasible"] is True
     assert results["ALT-D"]["feasible"] is True
     assert results["ALT-C"]["constraint_results"]["restriction"]["passed"] is False
-    assert results["ALT-E"]["constraint_results"]["fuel"]["feasible"] is False
 
 
 # TEST 18 — VALIDATOR RESULT STRUCTURE
@@ -282,3 +285,199 @@ def test_validator_keeps_severe_weather_as_risk_signal():
             has_hard_failures = len(res["rejection_reasons"]) > 0
             assert res["feasible"] == (not has_hard_failures)
     assert found_high_weather is True
+
+
+# ===========================================================================
+# TEMPORAL SECTOR CAPACITY (Parts 4 & 5)
+# ===========================================================================
+
+# TEST 21 — SECTOR RESULTS CONTAIN TEMPORAL TRAVERSAL WINDOWS
+def test_capacity_sector_results_include_traversal_times():
+    """capacity_check should expose entry_time_min and exit_time_min for each sector."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    result = capacity_check(state, route)
+    for sid, sr in result["sectors"].items():
+        assert "entry_time_min" in sr, f"sector {sid} missing entry_time_min"
+        assert "exit_time_min" in sr, f"sector {sid} missing exit_time_min"
+        assert sr["exit_time_min"] >= sr["entry_time_min"]
+
+
+# TEST 22 — SECTOR RESULTS CONTAIN REMAINING HEADROOM
+def test_capacity_sector_results_include_remaining_headroom():
+    """capacity_check should expose remaining_headroom = capacity - candidate_projected."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    result = capacity_check(state, route)
+    for sid, sr in result["sectors"].items():
+        expected = sr["capacity"] - sr["candidate_projected_occupancy"]
+        assert sr["remaining_headroom"] == expected, (
+            f"sector {sid}: headroom {sr['remaining_headroom']} != expected {expected}"
+        )
+
+
+# TEST 23 — CAPACITY RESULT INCLUDES CURRENT AND FORECAST OCCUPANCY
+def test_capacity_sector_results_include_current_and_forecast_occupancy():
+    """capacity_check should expose current_occupancy and forecast_demand."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    result = capacity_check(state, route)
+    for sid, sr in result["sectors"].items():
+        assert "current_occupancy" in sr
+        assert "forecast_demand" in sr
+        assert isinstance(sr["current_occupancy"], int)
+        assert isinstance(sr["forecast_demand"], int)
+
+
+# TEST 24 — BOM ARRIVAL RESULT INCLUDES TIMING METADATA
+def test_capacity_bom_result_includes_arrival_time_min():
+    """When the candidate destination is BOM, result should include arrival_time_min."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    result = capacity_check(state, route)
+    assert "arrival_time_min" in result["airport"]
+    assert result["airport"]["arrival_time_min"] is not None
+    assert result["airport"]["arrival_time_min"] > 0.0
+
+
+# TEST 25 — BOM HARD REJECT ONLY ON CLOSED STATUS
+def test_capacity_bom_hard_reject_only_when_closed():
+    """capacity_check should only hard-fail BOM when operational_status is CLOSED."""
+    state = load_world()
+    # Normal state with many inbound should still pass.
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    result = capacity_check(state, route)
+    assert result["airport"]["passed"] is True
+
+    # CLOSED should cause a hard failure.
+    state.airports["BOM"].operational_status = "CLOSED"
+    result_closed = capacity_check(state, route)
+    assert result_closed["airport"]["passed"] is False
+
+
+# TEST 26 — BOM DEGRADED WINDOW METADATA
+def test_capacity_bom_degraded_window_flagged_after_t8():
+    """After BOM arrival capacity drops (t=8), result should flag degraded_window."""
+    sim = DigitalTwinSimulator(load_world())
+    sim.advance(8)
+    assert sim.state.airports["BOM"].weather_status == "SEVERE_CONVECTIVE"
+
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    result = capacity_check(sim.state, route)
+    assert result["airport"]["degraded_window"] is True
+    assert "arrival_pressure_note" in result["airport"]
+
+
+# TEST 27 — SPEED AFFECTS TRAVERSAL TIME (HIGHER SPEED → EARLIER ARRIVAL)
+def test_capacity_higher_speed_yields_earlier_arrival():
+    """A faster candidate should arrive at BOM earlier (lower arrival_time_min)."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    slow = capacity_check(state, route, speed_kt=300)
+    fast = capacity_check(state, route, speed_kt=500)
+    assert fast["airport"]["arrival_time_min"] < slow["airport"]["arrival_time_min"]
+
+
+# TEST 28 — SECTOR TRAVERSAL TIME ORDERING IS MONOTONE
+def test_capacity_sector_entry_times_increase_along_route():
+    """Sectors encountered earlier along the route should have smaller entry_time_min values."""
+    state = load_world()
+    route = ["W0", "W4", "W5", "W7", "BOM"]
+    result = capacity_check(state, route, speed_kt=430, start_time=0.0)
+    # Collect entry times sorted by the position of the first sector-node in the route.
+    route_pos = {node: i for i, node in enumerate(route)}
+    sector_entries = []
+    for sid, sr in result["sectors"].items():
+        sector = state.sectors[sid]
+        first_node_pos = min(route_pos[n] for n in route if n in sector.nodes)
+        sector_entries.append((first_node_pos, sr["entry_time_min"]))
+    sector_entries.sort()
+    times = [t for _, t in sector_entries]
+    assert times == sorted(times), f"Sector entry times not monotonically increasing: {times}"
+
+
+# ===========================================================================
+# CONFLICT SPATIAL SEPARATION (Part 6)
+# ===========================================================================
+
+# TEST 29 — CONFLICT EVIDENCE INCLUDES SPATIAL SEPARATION
+def test_conflict_evidence_includes_estimated_spatial_separation_nm():
+    """Conflict check should return estimated_spatial_separation_nm in each conflict record."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    candidate_route = ["W0", "W4", "W5", "W7", "BOM"]
+    candidate_speed = target_flight.speed_kt
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(candidate_route)
+    other.route_index = 0
+    other.edge_progress_min = 0.0
+    other.status = "AIRBORNE"
+    other.speed_kt = candidate_speed
+
+    result = conflict_check(state, "F102", candidate_route, candidate_speed)
+    assert result["passed"] is False
+    c = result["conflicts"][0]
+    assert "estimated_spatial_separation_nm" in c
+    assert isinstance(c["estimated_spatial_separation_nm"], float)
+    assert c["estimated_spatial_separation_nm"] >= 0.0
+
+
+# TEST 30 — CONFLICT EVIDENCE INCLUDES SEGMENT LABEL
+def test_conflict_evidence_includes_segment_label():
+    """Conflict check should include a 'segment' string identifying the conflicting edge."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    candidate_route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(candidate_route)
+    other.route_index = 0
+    other.edge_progress_min = 0.0
+    other.status = "AIRBORNE"
+    other.speed_kt = target_flight.speed_kt
+
+    result = conflict_check(state, "F102", candidate_route, target_flight.speed_kt)
+    assert result["passed"] is False
+    c = result["conflicts"][0]
+    assert "segment" in c
+    assert "->" in c["segment"]
+
+
+# TEST 31 — CONFLICT EVIDENCE INCLUDES REQUIRED SEPARATION
+def test_conflict_evidence_includes_required_separation_nm():
+    """Each conflict record and the top-level result should include required_separation_nm."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    candidate_route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(candidate_route)
+    other.route_index = 0
+    other.edge_progress_min = 0.0
+    other.status = "AIRBORNE"
+    other.speed_kt = target_flight.speed_kt
+
+    result = conflict_check(state, "F102", candidate_route, target_flight.speed_kt)
+    assert result["required_separation_nm"] == 5.0
+    assert result["conflicts"][0]["required_separation_nm"] == 5.0
+
+
+# TEST 32 — SAME-POSITION CONFLICT YIELDS NEAR-ZERO SPATIAL SEPARATION
+def test_conflict_same_waypoint_zero_spatial_separation():
+    """Aircraft at the exact same waypoint at the same time should have ~0.0 NM separation."""
+    state = load_world()
+    target_flight = state.aircraft["F102"]
+    candidate_route = ["W0", "W4", "W5", "W7", "BOM"]
+
+    other = state.aircraft["AI2-01"]
+    other.route = list(candidate_route)
+    other.route_index = 0
+    other.edge_progress_min = 0.0
+    other.status = "AIRBORNE"
+    other.speed_kt = target_flight.speed_kt  # same speed → same waypoint at same time
+
+    result = conflict_check(state, "F102", candidate_route, target_flight.speed_kt)
+    c = result["conflicts"][0]
+    # Same position, same speed → near-zero spatial separation.
+    assert c["estimated_spatial_separation_nm"] == pytest.approx(0.0, abs=0.1)

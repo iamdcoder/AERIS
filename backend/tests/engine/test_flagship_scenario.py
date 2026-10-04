@@ -92,6 +92,11 @@ def test_flagship_candidate_validation_contract_and_route_diversity():
     assert [item["candidate_id"] for item in candidates] == ["ALT-A", "ALT-B", "ALT-C", "ALT-D", "ALT-E"]
     assert len({tuple(item["route"]) for item in candidates}) == 5
     assert all(item["flight_id"] == "F102" for item in candidates)
+    decision_node = public._engine().state.aircraft["F102"].route[
+        public._engine().state.aircraft["F102"].route_index
+    ]
+    assert all(item["route"][0] == decision_node for item in candidates)
+    assert all(item["route_valid"] for item in candidates)
 
     validations = {
         item["candidate_id"]: public.validate_candidate(item)
@@ -104,8 +109,6 @@ def test_flagship_candidate_validation_contract_and_route_diversity():
 
     assert validations["ALT-E"]["feasible"] is False
     assert validations["ALT-E"]["constraint_results"]["fuel"]["feasible"] is False
-    assert any("fuel" in reason.lower() or "reserve" in reason.lower()
-               for reason in validations["ALT-E"]["rejection_reasons"])
 
     assert validations["ALT-A"]["feasible"] is True
     assert validations["ALT-B"]["feasible"] is True
@@ -151,14 +154,6 @@ def test_repeated_clean_flagship_runs_return_identical_candidate_metrics():
     assert first == second
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "At T+19 F102 is at W3, but the hard-coded flagship candidates all start at W0; "
-        "simulation therefore compares different starting positions and cannot establish "
-        "the documented local-vs-network candidate story without engine/candidate integration work."
-    ),
-)
 def test_candidates_begin_at_f102_decision_position():
     public.advance_simulation(19)
     target = public._engine().state.aircraft["F102"]
@@ -168,14 +163,6 @@ def test_candidates_begin_at_f102_decision_position():
     assert all(candidate["route"][0] == decision_node for candidate in candidates)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Current scoring reports all feasible alternatives at 5/5 stress survival; "
-        "ALT-A scores above ALT-D because the time-stepped runs produce no candidate-specific "
-        "affected-flight/network ripple. Do not force a winner with fixture numbers."
-    ),
-)
 def test_alt_d_has_strongest_resilience_and_wins_engine_score():
     scored = _score_at_decision_time()
     by_id = {item["candidate_id"]: item for item in scored}

@@ -99,7 +99,8 @@ def load_world(scenario_name: str = "mumbai_weather_crisis.json") -> WorldState:
     templates = aircraft_raw["background_templates"]
     for i in range(count - 1):
         t = templates[i % len(templates)]
-        flight_id = f"{t['prefix']}-{i + 1:02d}"
+        seq = (i // len(templates)) + 1
+        flight_id = f"{t['prefix']}-{seq:02d}"
         route = list(t["route"])
         route_index = (i // len(templates)) % max(1, min(2, len(route) - 1))
         start_node = route[route_index]
@@ -133,4 +134,9 @@ def load_world(scenario_name: str = "mumbai_weather_crisis.json") -> WorldState:
         graph=graph,
         scenario=scenario,
     )
+    # Route generation receives the graph through the stable public facade.
+    # Keep a live reference to the loaded aircraft mapping there so strategy
+    # functions can resolve each flight's current route_index without guessing
+    # its origin or copying state into a second registry.
+    graph.graph["_aircraft_by_id"] = state.aircraft
     return state

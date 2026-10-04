@@ -1,4 +1,5 @@
 from app.engine.digital_twin.loaders import load_world
+from app.engine.digital_twin.simulator import DigitalTwinSimulator
 from app.engine.routes.generator import generate_candidate_routes
 from app.engine.routes.interventions import (
     generate_conservative_route,
@@ -38,7 +39,7 @@ def test_exact_routes():
     state = load_world()
     candidates = generate_candidate_routes(state.graph, "F102")
     by_id = {c["candidate_id"]: c["route"] for c in candidates}
-    assert by_id["ALT-A"] == ["W0", "W1", "W2", "W3", "W10", "W11", "W12", "BOM"]
+    assert by_id["ALT-A"] == ["W0", "W1", "W2", "W3", "W10", "W11", "BOM"]
     assert by_id["ALT-B"] == ["W0", "W1", "W4", "W5", "W6", "W8", "W11", "W12", "BOM"]
     assert by_id["ALT-C"] == ["W0", "W4", "W5", "W10", "W11", "W12", "BOM"]
     assert by_id["ALT-D"] == ["W0", "W4", "W5", "W7", "BOM"]
@@ -117,15 +118,59 @@ def test_individual_strategy_functions():
     assert c_e["strategy"] == "conservative_west_arc"
 
 
-def test_flight_id_change_preserves_route_definition():
+def test_candidate_strategy_identity_is_generic_across_flights():
     state = load_world()
-    a = generate_candidate_routes(state.graph, "F102")
-    b = generate_candidate_routes(state.graph, "F999")
-    assert len(a) == len(b) == 5
-    for candidate_a, candidate_b in zip(a, b):
-        assert candidate_a["flight_id"] == "F102"
-        assert candidate_b["flight_id"] == "F999"
-        assert {key: value for key, value in candidate_a.items() if key != "flight_id"} == {
-            key: value for key, value in candidate_b.items() if key != "flight_id"
-        }
+    candidates = generate_candidate_routes(state.graph, "AI2-01")
+    assert len(candidates) == 5
+    expected_node = state.aircraft["AI2-01"].route[0]
+    for candidate in candidates:
+        assert candidate["flight_id"] == "AI2-01"
+        assert candidate["route"][0] == expected_node
+        assert candidate["route_valid"] is True
+
+    flagship_candidates = generate_candidate_routes(state.graph, "F102")
+    for candidate_a, candidate_b in zip(flagship_candidates, candidates):
+        assert candidate_b["flight_id"] == "AI2-01"
+        assert candidate_a["candidate_id"] == candidate_b["candidate_id"]
+        assert candidate_a["intervention_type"] == candidate_b["intervention_type"]
+        assert candidate_a["strategy"] == candidate_b["strategy"]
+        assert candidate_a["cruise_altitude_ft"] == candidate_b["cruise_altitude_ft"]
+        assert candidate_a["speed_kt"] == candidate_b["speed_kt"]
+        assert candidate_a["timing_offset_min"] == candidate_b["timing_offset_min"]
+        assert candidate_a["hold_min"] == candidate_b["hold_min"]
+
+
+def test_candidate_generation_does_not_mutate_world_or_graph():
+    state = load_world()
+    before_flight = state.aircraft["F102"].model_dump()
+    before_edges = [
+        (source, target, dict(data))
+        for source, target, data in state.graph.edges(data=True)
+    ]
+    before_graph_metadata = dict(state.graph.graph)
+
+    generate_candidate_routes(state.graph, "F102")
+
+    assert state.aircraft["F102"].model_dump() == before_flight
+    assert list(state.graph.edges(data=True)) == before_edges
+    assert state.graph.graph == before_graph_metadata
+
+
+def test_candidate_routes_follow_current_route_index_after_advancing_world():
+    state = load_world()
+    simulator = DigitalTwinSimulator(state)
+    flight = state.aircraft["AI2-01"]
+    original_node = flight.route[flight.route_index]
+
+    for _ in range(20):
+        simulator.tick()
+        if flight.route[flight.route_index] != original_node:
+            break
+
+    current_node = flight.route[flight.route_index]
+    assert current_node != original_node
+    candidates = generate_candidate_routes(state.graph, flight.id)
+
+    assert all(candidate["route"][0] == current_node for candidate in candidates)
+    assert all(candidate["route_valid"] for candidate in candidates)
 

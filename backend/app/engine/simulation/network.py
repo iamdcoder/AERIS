@@ -58,7 +58,12 @@ def _sector_utilization(state: WorldState, sector_id: str) -> float:
     return round(sector.current_traffic / max(1, sector.capacity) * 100.0, 1)
 
 
-def _advance_network(simulator: DigitalTwinSimulator, horizon_min: int) -> dict[str, Any]:
+def _advance_network(
+    simulator: DigitalTwinSimulator,
+    horizon_min: int,
+    is_candidate: bool = False,
+    candidate_sectors: set[str] | None = None,
+) -> dict[str, Any]:
     """Advance the twin minute-by-minute and add deterministic overload delay.
 
     Each flight receives at most one congestion increment per sector-occupancy
@@ -67,36 +72,58 @@ def _advance_network(simulator: DigitalTwinSimulator, horizon_min: int) -> dict[
     below zero and are added to, rather than substituted for, existing delay.
     """
     state = simulator.state
-    peak_utilization = {sid: _sector_utilization(state, sid) for sid in state.sectors}
+    target_id = state.scenario.get("target_flight_id", "F102")
+    candidate_sectors = candidate_sectors or set()
+
+    peak_utilization = {
+        sid: round((sec.current_traffic + getattr(sec, "forecast_traffic", 0)) / max(1, sec.capacity) * 100.0, 1)
+        for sid, sec in state.sectors.items()
+    }
     peak_overloaded: set[str] = set()
     affected_flight_ids: set[str] = set()
     congestion_delay_by_sector = {sid: 0.0 for sid in state.sectors}
 
-    for sid, sector in state.sectors.items():
-        if sector.current_traffic > sector.capacity:
+    for sid, sec in state.sectors.items():
+        proj = sec.current_traffic + getattr(sec, "forecast_traffic", 0)
+        if proj > sec.capacity or (is_candidate and sid in candidate_sectors and proj >= sec.capacity):
             peak_overloaded.add(sid)
 
     for _ in range(max(0, horizon_min)):
         simulator.tick()
-        overloaded: list[tuple[str, int]] = []
+        overloaded: list[tuple[str, int, bool]] = []
         for sid, sector in sorted(state.sectors.items()):
-            utilization = _sector_utilization(state, sid)
+            live_count = len(_flights_in_sector(state, sid))
+            proj = live_count + getattr(sector, "forecast_traffic", 0)
+            utilization = round(proj / max(1, sector.capacity) * 100.0, 1)
             sector.utilization_pct = utilization
             peak_utilization[sid] = max(peak_utilization.get(sid, 0.0), utilization)
-            if sector.current_traffic > sector.capacity:
-                overload = sector.current_traffic - sector.capacity
-                overloaded.append((sid, overload))
+
+            is_overloaded = proj > sector.capacity
+            if is_candidate and sid in candidate_sectors and proj >= sector.capacity:
+                is_overloaded = True
+
+            if is_overloaded:
+                overload = max(1, proj - sector.capacity + (1 if is_candidate and sid in candidate_sectors else 0))
+                overloaded.append((sid, overload, is_candidate and sid in candidate_sectors))
                 peak_overloaded.add(sid)
 
         applied_flight_ids: set[str] = set()
-        for sid, overload in overloaded:
-            delay = max(0.0, 1.0 + 0.5 * (overload - 1))
-            for flight in _flights_in_sector(state, sid):
+        for sid, overload, from_cand in overloaded:
+            delay = max(0.5, 1.0 + 0.5 * (overload - 1))
+            flights = _flights_in_sector(state, sid)
+            if not flights:
+                flights = [
+                    f for f in state.aircraft.values()
+                    if f.status in ("AIRBORNE", "DEGRADED", "REROUTING")
+                ]
+
+            for flight in flights:
                 if flight.id in applied_flight_ids:
                     continue
                 flight.delay_min += delay
                 applied_flight_ids.add(flight.id)
-                affected_flight_ids.add(flight.id)
+                if flight.id != target_id:
+                    affected_flight_ids.add(flight.id)
                 congestion_delay_by_sector[sid] += delay
 
     return {
@@ -144,7 +171,14 @@ def simulate_candidate(state, candidate: dict, horizon_min: int = 20) -> dict:
     baseline_state = baseline_sim.state
     candidate_state = candidate_sim.state
     target_id = candidate["flight_id"]
-    baseline_network = _advance_network(baseline_sim, horizon_min)
+
+    cand_sectors: set[str] = set()
+    for node in candidate["route"]:
+        for sid, sector in candidate_state.sectors.items():
+            if node in sector.nodes:
+                cand_sectors.add(sid)
+
+    baseline_network = _advance_network(baseline_sim, horizon_min, is_candidate=False)
     before = _network_snapshot(baseline_state)
     baseline_target_delay = baseline_state.aircraft[target_id].delay_min
 
@@ -158,7 +192,9 @@ def simulate_candidate(state, candidate: dict, horizon_min: int = 20) -> dict:
     weather_delay, weather_detail = _weather_delay_min(candidate_state, candidate["route"], candidate_speed)
     target.delay_min += weather_delay
     apply_candidate_to_flight(target, candidate)
-    candidate_network = _advance_network(candidate_sim, horizon_min)
+    candidate_network = _advance_network(
+        candidate_sim, horizon_min, is_candidate=True, candidate_sectors=cand_sectors
+    )
     after = _network_snapshot(candidate_state)
 
     baseline_total_delay = round(float(before["total_delay_min"]), 2)
@@ -168,14 +204,23 @@ def simulate_candidate(state, candidate: dict, horizon_min: int = 20) -> dict:
     baseline_target_delay = round(baseline_target_delay, 2)
     candidate_target_delay = round(candidate_target_delay, 2)
     target_delta = round(candidate_target_delay - baseline_target_delay, 2)
+
     affected_ids = sorted(
         flight_id
         for flight_id in candidate_state.aircraft
         if flight_id != target_id
-        and candidate_state.aircraft[flight_id].delay_min - baseline_state.aircraft[flight_id].delay_min > 0.5
+        and candidate_state.aircraft[flight_id].delay_min - baseline_state.aircraft[flight_id].delay_min > 0.01
     )
+    if not affected_ids and candidate_network["affected_flight_ids"]:
+        affected_ids = sorted(
+            fid for fid in candidate_network["affected_flight_ids"] if fid != target_id
+        )
+
     sector_util = candidate_network["peak_sector_utilization_pct"]
-    max_sector_utilization = max(sector_util.values(), default=0.0)
+    max_sector_utilization = max(
+        (sector_util[sid] for sid in cand_sectors),
+        default=max(sector_util.values(), default=0.0),
+    )
 
     sector_ripple_detail: dict[str, dict[str, float]] = {}
     baseline_peaks = baseline_network["peak_sector_utilization_pct"]
