@@ -9,6 +9,8 @@ from .evidence import EvidenceStore
 from .gemini_runner import (
     GeminiInvestigator,
 )
+from copilot.agent.approval import ApprovalController
+from copilot.agent.reassessment import CandidateReassessor
 from .investigation_quality import (
     InvestigationQuality,
 )
@@ -63,6 +65,10 @@ class AgentOrchestrator:
         self.gemini_investigator = (
          gemini_investigator
         )
+        self.approval_controller = ApprovalController()
+        self.reassessor = CandidateReassessor(
+            ranker=self.ranker,
+        )
 
         self.evidence = EvidenceStore()
 
@@ -112,7 +118,15 @@ class AgentOrchestrator:
                 state,
                 exc,
             )
-
+    def _rejected_candidate_ids_for_current_run(
+        self,
+    ) -> list[str]:
+        return [
+            record.candidate_id
+            for record in self.approval_controller.history
+            if record.decision.value == "REJECTED"
+        ]
+        
     def run_hybrid_preview(
         self,
         *,
