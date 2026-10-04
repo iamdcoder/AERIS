@@ -190,6 +190,7 @@ def _build_fake_client(
 
 def test_gemini_client_executes_allowed_tool():
     _require_genai_sdk()
+
     fake_models = FakeModels()
 
     fake_client = _build_fake_client(
@@ -215,10 +216,9 @@ def test_gemini_client_executes_allowed_tool():
     )
 
     assert (
-        result.status
+        result.execution.status
         == "COMPLETED"
     )
-
     assert (
         result.rounds
         == 2
