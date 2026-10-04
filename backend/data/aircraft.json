@@ -1,4 +1,194 @@
 {
-  "aircraft": [],
-  "note": "Populate with deterministic 30\u201350 aircraft baseline."
+  "count": 40,
+  "target": {
+    "id": "F102",
+    "callsign": "AI102",
+    "start_node": "W0",
+    "destination": "BOM",
+    "fuel_remaining_min": 70,
+    "burn_rate_min_per_min": 1.0,
+    "speed_kt": 430,
+    "altitude_ft": 32000,
+    "performance_class": "A320",
+    "status": "AIRBORNE",
+    "airline": "SIM-AIR",
+    "tail_number": "VT-S102",
+    "route": [
+      "W0",
+      "W1",
+      "W2",
+      "W3",
+      "W10",
+      "W11",
+      "W12",
+      "BOM"
+    ]
+  },
+  "background_templates": [
+    {
+      "prefix": "AI2",
+      "start_node": "W1",
+      "route": [
+        "W1",
+        "W2",
+        "W3",
+        "W10",
+        "W11",
+        "W12",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 440,
+      "altitude_ft": 30000,
+      "fuel_remaining_min": 55,
+      "burn_rate_min_per_min": 0.95
+    },
+    {
+      "prefix": "AI3",
+      "start_node": "W2",
+      "route": [
+        "W2",
+        "W3",
+        "W10",
+        "W11",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 420,
+      "altitude_ft": 32000,
+      "fuel_remaining_min": 48,
+      "burn_rate_min_per_min": 0.95
+    },
+    {
+      "prefix": "AI4",
+      "start_node": "W4",
+      "route": [
+        "W4",
+        "W5",
+        "W6",
+        "W8",
+        "W11",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 450,
+      "altitude_ft": 30000,
+      "fuel_remaining_min": 50,
+      "burn_rate_min_per_min": 0.9
+    },
+    {
+      "prefix": "AI5",
+      "start_node": "W5",
+      "route": [
+        "W5",
+        "W10",
+        "W11",
+        "W12",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 435,
+      "altitude_ft": 34000,
+      "fuel_remaining_min": 46,
+      "burn_rate_min_per_min": 0.95
+    },
+    {
+      "prefix": "AI6",
+      "start_node": "W6",
+      "route": [
+        "W6",
+        "W7",
+        "W9",
+        "W11",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 425,
+      "altitude_ft": 28000,
+      "fuel_remaining_min": 52,
+      "burn_rate_min_per_min": 0.9
+    },
+    {
+      "prefix": "AI7",
+      "start_node": "W7",
+      "route": [
+        "W7",
+        "W9",
+        "W8",
+        "W11",
+        "W12",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 410,
+      "altitude_ft": 30000,
+      "fuel_remaining_min": 45,
+      "burn_rate_min_per_min": 0.95
+    },
+    {
+      "prefix": "AI8",
+      "start_node": "W8",
+      "route": [
+        "W8",
+        "W11",
+        "W12",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 445,
+      "altitude_ft": 32000,
+      "fuel_remaining_min": 42,
+      "burn_rate_min_per_min": 0.9
+    },
+    {
+      "prefix": "AI9",
+      "start_node": "W3",
+      "route": [
+        "W3",
+        "W5",
+        "W6",
+        "W8",
+        "W11",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 435,
+      "altitude_ft": 30000,
+      "fuel_remaining_min": 49,
+      "burn_rate_min_per_min": 0.95
+    },
+    {
+      "prefix": "AI1",
+      "start_node": "W1",
+      "route": [
+        "W1",
+        "PNQ",
+        "W7",
+        "W9",
+        "W11",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 420,
+      "altitude_ft": 26000,
+      "fuel_remaining_min": 54,
+      "burn_rate_min_per_min": 0.9
+    },
+    {
+      "prefix": "IX2",
+      "start_node": "PNQ",
+      "route": [
+        "PNQ",
+        "W7",
+        "W9",
+        "W11",
+        "BOM"
+      ],
+      "destination": "BOM",
+      "speed_kt": 415,
+      "altitude_ft": 28000,
+      "fuel_remaining_min": 44,
+      "burn_rate_min_per_min": 0.9
+    }
+  ]
 }

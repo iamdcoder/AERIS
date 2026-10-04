@@ -1,3 +1,13 @@
 {
-  "weather_cells": []
+  "weather_cells": [
+    {
+      "id":"WX-BOM-01",
+      "geometry":{"type":"Polygon","coordinates":[[[73.18,19.22],[73.42,19.22],[73.42,19.55],[73.18,19.55],[73.18,19.22]]]},
+      "intensity":"MODERATE",
+      "movement":{"lat_per_min":0.004,"lon_per_min":-0.006,"expansion_per_min":0.0},
+      "uncertainty":0.15,
+      "type":"CONVECTIVE",
+      "active":true
+    }
+  ]
 }
