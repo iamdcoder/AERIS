@@ -17,7 +17,7 @@
     {"t":21,"event":"evaluate_remaining_3"},
     {"t":24,"event":"stress_test_3_futures","payload":{"scenario_count":5}},
     {"t":26,"event":"critic_challenges_leader"},
-    {"t":28,"event":"recommend_resilient_option","payload":{"preferred":"ALT-D"}},
+    {"t":28,"event":"recommend_resilient_option","payload":{}},
     {"t":30,"event":"dispatcher_approval"},
     {"t":32,"event":"verify_network_improvement"},
     {"t":35,"event":"continue_monitoring"}

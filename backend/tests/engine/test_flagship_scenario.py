@@ -204,3 +204,25 @@ def test_alt_d_has_strongest_resilience_and_wins_engine_score():
         assert evidence["validation"] == by_id[candidate_id]["decision_context"]["validation"]
         assert evidence["simulation"] == by_id[candidate_id]["decision_context"]["simulation"]
         assert evidence["stress_report"] == by_id[candidate_id]["decision_context"]["stress_report"]
+
+
+def test_flagship_scenario_contains_no_explicit_preferred_candidate_and_alt_d_wins_naturally():
+    scenario = load_scenario()
+    recommend_events = [
+        event for event in scenario.get("events", [])
+        if "recommend" in event.get("event", "") or event.get("t") == 28
+    ]
+    assert len(recommend_events) > 0
+    forbidden_fields = {"preferred", "forced_candidate", "winner", "candidate_override", "preferred_candidate"}
+    for event in scenario.get("events", []):
+        payload = event.get("payload", {})
+        for field in forbidden_fields:
+            assert field not in payload, f"Scenario event '{event.get('event')}' contains explicit candidate selection field '{field}'"
+
+    scored = _score_at_decision_time()
+    ranked_feasible = [c for c in scored if c.get("feasible")]
+    assert len(ranked_feasible) > 0
+    top_candidate = ranked_feasible[0]
+    assert top_candidate["candidate_id"] == "ALT-D"
+    assert top_candidate["decision_score"] > ranked_feasible[1]["decision_score"]
+
