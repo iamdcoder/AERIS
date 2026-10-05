@@ -1,0 +1,19 @@
+{
+  "candidate_id": "ALT-D",
+  "flight_id": "F102",
+  "intervention_type": "reroute",
+  "route": ["W1", "W7", "W11", "W15"],
+  "feasible": true,
+  "constraint_results": {"fuel": "PASS", "capacity": "PASS", "conflict": "PASS", "restriction": "PASS"},
+  "target_delay_min": 8,
+  "added_distance_km": 42,
+  "fuel_reserve_margin_min": 48,
+  "affected_flights": 1,
+  "network_delay_delta_min": -14,
+  "max_sector_utilization_pct": 82,
+  "stress_survival": {"passed": 5, "total": 5},
+  "decision_score": 0.91,
+  "reintervention_probability": 0.08,
+  "regret": 0.11,
+  "rejection_reasons": []
+}

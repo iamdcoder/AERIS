@@ -1,0 +1,270 @@
+{
+  "sectors": [
+    {
+      "id": "S1",
+      "capacity": 12,
+      "current_traffic": 0,
+      "forecast_traffic": 5,
+      "utilization_pct": 41.7,
+      "nodes": [
+        "W0",
+        "W1"
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.45,
+              19.85
+            ],
+            [
+              73.95,
+              19.85
+            ],
+            [
+              73.95,
+              20.2
+            ],
+            [
+              73.45,
+              20.2
+            ],
+            [
+              73.45,
+              19.85
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "S2",
+      "capacity": 10,
+      "current_traffic": 0,
+      "forecast_traffic": 5,
+      "utilization_pct": 50.0,
+      "nodes": [
+        "W2"
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.45,
+              19.45
+            ],
+            [
+              73.95,
+              19.45
+            ],
+            [
+              73.95,
+              19.85
+            ],
+            [
+              73.45,
+              19.85
+            ],
+            [
+              73.45,
+              19.45
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "S3",
+      "capacity": 9,
+      "current_traffic": 0,
+      "forecast_traffic": 6,
+      "utilization_pct": 66.7,
+      "nodes": [
+        "W3"
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.1,
+              19.25
+            ],
+            [
+              73.55,
+              19.25
+            ],
+            [
+              73.55,
+              19.65
+            ],
+            [
+              73.1,
+              19.65
+            ],
+            [
+              73.1,
+              19.25
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "S4",
+      "capacity": 12,
+      "current_traffic": 0,
+      "forecast_traffic": 8,
+      "utilization_pct": 66.7,
+      "nodes": [
+        "W4",
+        "W5",
+        "W6",
+        "W7"
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.2,
+              18.55
+            ],
+            [
+              74.05,
+              18.55
+            ],
+            [
+              74.05,
+              19.45
+            ],
+            [
+              73.2,
+              19.45
+            ],
+            [
+              73.2,
+              18.55
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "S5",
+      "capacity": 10,
+      "current_traffic": 0,
+      "forecast_traffic": 9,
+      "utilization_pct": 90.0,
+      "nodes": [
+        "W10",
+        "W11"
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              72.85,
+              18.95
+            ],
+            [
+              73.2,
+              18.95
+            ],
+            [
+              73.2,
+              19.45
+            ],
+            [
+              72.85,
+              19.45
+            ],
+            [
+              72.85,
+              18.95
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "S6",
+      "capacity": 7,
+      "current_traffic": 0,
+      "forecast_traffic": 5,
+      "utilization_pct": 71.4,
+      "nodes": [
+        "W8",
+        "W9"
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.0,
+              18.55
+            ],
+            [
+              73.45,
+              18.55
+            ],
+            [
+              73.45,
+              19.05
+            ],
+            [
+              73.0,
+              19.05
+            ],
+            [
+              73.0,
+              18.55
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "S7",
+      "capacity": 12,
+      "current_traffic": 0,
+      "forecast_traffic": 7,
+      "utilization_pct": 58.3,
+      "nodes": [
+        "W12",
+        "BOM"
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              72.7,
+              18.85
+            ],
+            [
+              73.0,
+              18.85
+            ],
+            [
+              73.0,
+              19.25
+            ],
+            [
+              72.7,
+              19.25
+            ],
+            [
+              72.7,
+              18.85
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

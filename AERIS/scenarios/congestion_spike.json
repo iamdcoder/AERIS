@@ -1,0 +1,5 @@
+{
+  "id": "congestion_spike",
+  "name": "Sector Congestion Spike",
+  "perturbations": [{"type":"sector_capacity_reduction","value_pct":25}]
+}

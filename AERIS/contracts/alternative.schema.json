@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aeris/alternative",
+  "type": "object",
+  "required": ["candidate_id", "flight_id", "intervention_type", "feasible"],
+  "properties": {
+    "candidate_id": {"type": "string"}, "flight_id": {"type": "string"}, "intervention_type": {"type": "string"},
+    "route": {"type": "array", "items": {"type": "string"}}, "feasible": {"type": "boolean"},
+    "target_delay_min": {"type": "number"}, "added_distance_km": {"type": "number"},
+    "fuel_reserve_margin_min": {"type": "number"}, "affected_flights": {"type": "integer"},
+    "network_delay_delta_min": {"type": "number"}, "max_sector_utilization_pct": {"type": "number"},
+    "decision_score": {"type": "number"}, "reintervention_probability": {"type": "number"}, "regret": {"type": "number"},
+    "constraint_results": {"type": "object"}, "rejection_reasons": {"type": "array", "items": {"type": "string"}}
+  }
+}

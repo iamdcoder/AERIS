@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+networkx
+shapely
+pytest
+httpx
+google-genai>=2.0.0

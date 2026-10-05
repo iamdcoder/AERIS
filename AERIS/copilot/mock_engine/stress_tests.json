@@ -1,0 +1,88 @@
+{
+  "results": [
+    {
+      "candidate_id": "ALT-B",
+      "passed": 3,
+      "total": 5,
+      "critical_failure": "Sector S5 overloads after 20% weather expansion.",
+      "scenarios": [
+        {
+          "id": "WEATHER_PLUS_10",
+          "status": "PASS"
+        },
+        {
+          "id": "WEATHER_PLUS_20",
+          "status": "FAIL"
+        },
+        {
+          "id": "CAPACITY_MINUS_10",
+          "status": "PASS"
+        },
+        {
+          "id": "CAPACITY_MINUS_20",
+          "status": "FAIL"
+        },
+        {
+          "id": "TRAFFIC_PLUS_10",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "candidate_id": "ALT-C",
+      "passed": 4,
+      "total": 5,
+      "critical_failure": "Downstream airport degradation causes a second intervention requirement.",
+      "scenarios": [
+        {
+          "id": "WEATHER_PLUS_10",
+          "status": "PASS"
+        },
+        {
+          "id": "WEATHER_PLUS_20",
+          "status": "PASS"
+        },
+        {
+          "id": "CAPACITY_MINUS_10",
+          "status": "PASS"
+        },
+        {
+          "id": "CAPACITY_MINUS_20",
+          "status": "FAIL"
+        },
+        {
+          "id": "TRAFFIC_PLUS_10",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "candidate_id": "ALT-D",
+      "passed": 5,
+      "total": 5,
+      "critical_failure": null,
+      "scenarios": [
+        {
+          "id": "WEATHER_PLUS_10",
+          "status": "PASS"
+        },
+        {
+          "id": "WEATHER_PLUS_20",
+          "status": "PASS"
+        },
+        {
+          "id": "CAPACITY_MINUS_10",
+          "status": "PASS"
+        },
+        {
+          "id": "CAPACITY_MINUS_20",
+          "status": "PASS"
+        },
+        {
+          "id": "TRAFFIC_PLUS_10",
+          "status": "PASS"
+        }
+      ]
+    }
+  ]
+}

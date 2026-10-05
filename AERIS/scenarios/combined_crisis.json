@@ -1,0 +1,9 @@
+{
+  "id": "combined_crisis",
+  "name": "Combined Weather + Capacity + Restriction",
+  "perturbations": [
+    {"type":"weather_expansion","value_pct":20},
+    {"type":"sector_capacity_reduction","value_pct":20},
+    {"type":"temporary_restriction","enabled":true}
+  ]
+}
