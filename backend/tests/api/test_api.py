@@ -336,23 +336,3 @@ def test_openapi_schema_is_generated(client):
     }
     for path in contract_paths:
         assert path in paths, f"Contract path {path!r} missing from OpenAPI schema"
-
-
-def test_airspace_websocket_stream():
-    from fastapi.testclient import TestClient
-    from app.api.app import app
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws/airspace") as websocket:
-        first = websocket.receive_json()
-        assert first["type"] == "AIRSPACE_SNAPSHOT"
-        assert "data" in first
-
-        websocket.send_text("ping")
-        pong = websocket.receive_json()
-        assert pong["type"] == "PONG"
-
-        websocket.send_json({"action": "advance", "minutes": 1})
-        advanced = websocket.receive_json()
-        # The first message after a control packet may be a periodic snapshot or advance result.
-        assert advanced["type"] in {"AIRSPACE_ADVANCED", "AIRSPACE_SNAPSHOT"}

@@ -22,7 +22,7 @@ for _path in (_REPO_ROOT, _BACKEND):
         sys.path.insert(0, _path)
 
 from fastapi.testclient import TestClient  # noqa: E402
-from app.api.app import app  # noqa: E402
+from backend.app.api.app import app  # noqa: E402
 
 SCENARIO_ID = "mumbai_weather_crisis_v2"
 TARGET_FLIGHT = "F102"

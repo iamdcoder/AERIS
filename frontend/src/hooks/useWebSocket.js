@@ -1,75 +1,233 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-function defaultWebSocketUrl() {
-  if (import.meta.env.VITE_WS_URL) {
-    return import.meta.env.VITE_WS_URL;
-  }
+import {
+  buildOperationsWebSocketUrl,
+  fetchLiveOperations,
+} from "../lib/api";
 
-  const httpBase =
-    import.meta.env.VITE_API_URL ||
-    import.meta.env.VITE_API_BASE_URL ||
-    "http://127.0.0.1:8000";
-
-  return String(httpBase).replace(/^http/, "ws").replace(/\/+$/, "") + "/ws/airspace";
-}
-
-export function useWebSocket({ enabled = true } = {}) {
+export function useWebSocket({
+  enabled = true,
+  pollIntervalMs = 1500,
+  reconnectDelayMs = 4000,
+} = {}) {
+  const [snapshot, setSnapshot] = useState(null);
   const [connected, setConnected] = useState(false);
-  const [lastMessage, setLastMessage] = useState(null);
-  const [error, setError] = useState(null);
-  const socketRef = useRef(null);
-  const retryRef = useRef(null);
-  const attemptsRef = useRef(0);
+  const [transport, setTransport] = useState("OFFLINE");
 
-  useEffect(() => {
-    if (!enabled || typeof window === "undefined" || !window.WebSocket) {
-      return undefined;
+  const socketRef = useRef(null);
+  const pollTimerRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const reconnectScheduledRef = useRef(false);
+  const stoppedRef = useRef(false);
+  const connectionGenerationRef = useRef(0);
+
+  const clearTimers = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
     }
 
-    let disposed = false;
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
 
-    const connect = () => {
-      if (disposed) return;
+    reconnectScheduledRef.current = false;
+  }, []);
 
-      const socket = new WebSocket(defaultWebSocketUrl());
-      socketRef.current = socket;
+  const closeSocket = useCallback(() => {
+    const socket = socketRef.current;
+    socketRef.current = null;
 
-      socket.onopen = () => {
-        attemptsRef.current = 0;
+    if (!socket) {
+      return;
+    }
+
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = null;
+    socket.onclose = null;
+
+    try {
+      socket.close();
+    } catch {
+      // The browser may already have closed the connection.
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    if (!enabled || stoppedRef.current) {
+      return;
+    }
+
+    if (pollTimerRef.current !== null) {
+      return;
+    }
+
+    const poll = async () => {
+      const result = await fetchLiveOperations();
+
+      if (stoppedRef.current) {
+        return;
+      }
+
+      if (result.ok) {
+        setSnapshot(result.data);
         setConnected(true);
-        setError(null);
-        socket.send("ping");
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          setLastMessage(JSON.parse(event.data));
-        } catch {
-          setLastMessage({ type: "TEXT", data: event.data });
-        }
-      };
-
-      socket.onerror = () => {
-        setError("Realtime stream unavailable; REST remains authoritative.");
-      };
-
-      socket.onclose = () => {
+        setTransport("POLLING");
+      } else {
         setConnected(false);
-        if (disposed) return;
-        const delay = Math.min(8000, 500 * (2 ** Math.min(attemptsRef.current, 4)));
-        attemptsRef.current += 1;
-        retryRef.current = window.setTimeout(connect, delay);
-      };
+        setTransport("OFFLINE");
+      }
     };
 
+    void poll();
+    pollTimerRef.current = window.setInterval(
+      poll,
+      Math.max(1000, pollIntervalMs),
+    );
+  }, [enabled, pollIntervalMs]);
+
+  const scheduleReconnect = useCallback(
+    (connectFn) => {
+      if (
+        stoppedRef.current ||
+        reconnectScheduledRef.current
+      ) {
+        return;
+      }
+
+      reconnectScheduledRef.current = true;
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        reconnectScheduledRef.current = false;
+        connectFn();
+      }, reconnectDelayMs);
+    },
+    [reconnectDelayMs],
+  );
+
+  const connect = useCallback(() => {
+    if (!enabled || stoppedRef.current) {
+      return;
+    }
+
+    clearTimers();
+    closeSocket();
+
+    const generation = ++connectionGenerationRef.current;
+    let socket;
+
+    try {
+      socket = new WebSocket(buildOperationsWebSocketUrl());
+    } catch {
+      setConnected(false);
+      setTransport("POLLING");
+      startPolling();
+      scheduleReconnect(connect);
+      return;
+    }
+
+    socketRef.current = socket;
+
+    socket.onopen = () => {
+      if (
+        stoppedRef.current ||
+        generation !== connectionGenerationRef.current
+      ) {
+        closeSocket();
+        return;
+      }
+
+      setConnected(true);
+      setTransport("WEBSOCKET");
+    };
+
+    socket.onmessage = (message) => {
+      if (
+        stoppedRef.current ||
+        generation !== connectionGenerationRef.current
+      ) {
+        return;
+      }
+
+      try {
+        const data = JSON.parse(message.data);
+
+        if (data.type === "heartbeat") {
+          return;
+        }
+
+        setSnapshot(data);
+        setConnected(true);
+        setTransport("WEBSOCKET");
+      } catch {
+        // Ignore malformed packets and preserve the last good snapshot.
+      }
+    };
+
+    socket.onerror = () => {
+      if (
+        stoppedRef.current ||
+        generation !== connectionGenerationRef.current
+      ) {
+        return;
+      }
+
+      setConnected(false);
+      setTransport("POLLING");
+      startPolling();
+    };
+
+    socket.onclose = () => {
+      if (generation !== connectionGenerationRef.current) {
+        return;
+      }
+
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
+
+      if (stoppedRef.current) {
+        return;
+      }
+
+      setConnected(false);
+      setTransport("POLLING");
+      startPolling();
+      scheduleReconnect(connect);
+    };
+  }, [
+    clearTimers,
+    closeSocket,
+    enabled,
+    scheduleReconnect,
+    startPolling,
+  ]);
+
+  useEffect(() => {
+    stoppedRef.current = false;
     connect();
 
     return () => {
-      disposed = true;
-      if (retryRef.current) window.clearTimeout(retryRef.current);
-      if (socketRef.current) socketRef.current.close();
+      stoppedRef.current = true;
+      clearTimers();
+      closeSocket();
+      connectionGenerationRef.current += 1;
+      setConnected(false);
+      setTransport("OFFLINE");
     };
-  }, [enabled]);
+  }, [clearTimers, closeSocket, connect]);
 
-  return { connected, lastMessage, error };
+  return {
+    snapshot,
+    connected,
+    transport,
+    reconnect: connect,
+  };
 }

@@ -3,8 +3,6 @@ import {
   useState,
 } from "react";
 
-import { useWebSocket } from "./hooks/useWebSocket";
-
 import AirspaceMap from "./components/AirspaceMap";
 import DisruptionAlert from "./components/DisruptionAlert";
 import CandidateCards from "./components/CandidateCards";
@@ -17,13 +15,19 @@ import ApprovalPanel from "./components/ApprovalPanel";
 import VerificationPanel from "./components/VerificationPanel";
 import FlightDetail from "./components/FlightDetail";
 import Timeline from "./components/Timeline";
+import LiveOperationsPanel from "./components/LiveOperationsPanel";
+import { useWebSocket } from "./hooks/useWebSocket";
 
 import {
   approveCopilotRun,
   fetchBaseline,
+  healthCheck,
   rejectCopilotRun,
   resetCopilot,
+  resetLiveReplay,
   runCopilotRecommendation,
+  startLiveReplay,
+  stopLiveReplay,
 } from "./lib/api";
 
 import {
@@ -32,22 +36,15 @@ import {
   normalizeBaseline,
 } from "./lib/dashboardAdapter";
 
-import {
-  DEMO_DASHBOARD,
-} from "./lib/demoData";
-
-import {
-  approveOfflineRun,
-  createOfflineAgentState,
-  rejectOfflineRun,
-} from "./lib/demoAgentState";
-
 
 const FLAGSHIP_SCENARIO_ID =
   "mumbai_weather_crisis_v2";
 
 const FLAGSHIP_DECISION_TIME_MIN =
   19;
+
+const LIVE_REPLAY_END_MIN =
+  35;
 
 const TARGET_FLIGHT_ID =
   "F102";
@@ -84,8 +81,7 @@ function Header({
   phase,
   onRun,
   disabled,
-  offlineMode,
-  streamConnected,
+  backendStatus,
 }) {
   const running =
     phase ===
@@ -143,21 +139,27 @@ function Header({
 
 
       <div className="header-actions">
-        <div className={`system-state ${offlineMode ? "offline" : ""}`}>
+        <div
+          className={`system-state ${
+            backendStatus === "OFFLINE"
+              ? "offline"
+              : backendStatus === "CHECKING"
+                ? "checking"
+                : ""
+          }`}
+        >
           <span />
 
           {running
             ? "ORCHESTRATING"
-            : offlineMode
-              ? "OFFLINE FALLBACK"
-              : phase === "WAITING_APPROVAL"
-                ? "WAITING HUMAN"
-                : mode}
-        </div>
-
-        <div className="stream-status">
-          <i className={streamConnected ? "connected" : ""} />
-          {streamConnected ? "LIVE STREAM" : offlineMode ? "LOCAL PRESENTATION" : "API LINK"}
+            : backendStatus === "OFFLINE"
+              ? "BACKEND OFFLINE"
+              : backendStatus === "CHECKING"
+                ? "CHECKING BACKEND"
+                : phase ===
+                    "WAITING_APPROVAL"
+                  ? "WAITING HUMAN"
+                  : mode}
         </div>
 
 
@@ -165,7 +167,8 @@ function Header({
           type="button"
           className="run-button"
           disabled={
-            disabled
+            disabled ||
+            waiting
           }
           onClick={
             onRun
@@ -174,7 +177,7 @@ function Header({
           {running
             ? "AERIS RUNNING..."
             : waiting
-              ? "DECISION READY"
+              ? "APPROVAL PENDING"
               : completed
                 ? "RERUN AERIS"
                 : failed
@@ -372,7 +375,6 @@ function LoadingScreen() {
 function ErrorBanner({
   message,
   onRetry,
-  offline = false,
 }) {
   if (!message) {
     return null;
@@ -383,7 +385,7 @@ function ErrorBanner({
     <section className="error-banner">
       <div>
         <strong>
-          {offline ? "OFFLINE PRESENTATION MODE" : "AERIS BACKEND ERROR"}
+          AERIS BACKEND ERROR
         </strong>
 
         <span>
@@ -445,19 +447,119 @@ function App() {
     "",
   );
 
-  const [
-    offlineMode,
-    setOfflineMode,
-  ] = useState(false);
 
-  const { connected: streamConnected } = useWebSocket({
-    enabled: !offlineMode,
-  });
+  const [
+    liveBusy,
+    setLiveBusy,
+  ] = useState(
+    false,
+  );
+
+
+  const [
+    backendStatus,
+    setBackendStatus,
+  ] = useState(
+    "CHECKING",
+  );
+
+
+  const {
+    snapshot: liveSnapshot,
+    connected: liveConnected,
+    transport: liveTransport,
+    reconnect: reconnectLive,
+  } = useWebSocket();
 
 
   useEffect(() => {
     loadBaseline();
   }, []);
+
+
+  useEffect(() => {
+    let disposed = false;
+
+    async function checkBackend() {
+      const result = await healthCheck();
+
+      if (disposed) {
+        return;
+      }
+
+      setBackendStatus(
+        result.ok
+          ? "CONNECTED"
+          : "OFFLINE",
+      );
+    }
+
+    checkBackend();
+
+    const timer = window.setInterval(
+      checkBackend,
+      30000,
+    );
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+
+  useEffect(() => {
+    if (
+      agentState ||
+      !liveSnapshot?.entities?.airspace?.CURRENT
+    ) {
+      return;
+    }
+
+    const airspace =
+      liveSnapshot.entities.airspace.CURRENT;
+
+    const network =
+      {
+        total_flights:
+          Array.isArray(airspace.aircraft)
+            ? airspace.aircraft.length
+            : undefined,
+        airborne_flights:
+          Array.isArray(airspace.aircraft)
+            ? airspace.aircraft.filter(
+                (flight) =>
+                  flight.status === "AIRBORNE",
+              ).length
+            : undefined,
+        holding_flights:
+          Array.isArray(airspace.aircraft)
+            ? airspace.aircraft.filter(
+                (flight) =>
+                  flight.status === "HOLDING",
+              ).length
+            : undefined,
+      };
+
+    const normalized =
+      normalizeBaseline({
+        airspace,
+        disruptions: {
+          weather_cells:
+            airspace.weather_cells || [],
+          restrictions:
+            airspace.restrictions || [],
+        },
+        network,
+        flight:
+          (airspace.aircraft || []).find(
+            (flight) =>
+              flight.id === TARGET_FLIGHT_ID,
+          ),
+      });
+
+    setDashboard(normalized);
+  }, [agentState, liveSnapshot]);
 
 
   async function loadBaseline() {
@@ -471,17 +573,13 @@ function App() {
 
 
     if (!result.ok) {
-      setOfflineMode(true);
-      setDashboard({ ...DEMO_DASHBOARD, scenarioId: FLAGSHIP_SCENARIO_ID });
-      setAgentState(null);
-      setSelectedCandidateId(null);
       setError(
-        "Backend unavailable. The command center is showing the deterministic flagship presentation fallback.",
+        result.error ||
+          "Unable to load the AERIS baseline.",
       );
+
       return;
     }
-
-    setOfflineMode(false);
 
 
     const baseline =
@@ -506,121 +604,192 @@ function App() {
   }
 
 
-  async function runAeris() {
-    if (busy) {
+  async function handleLiveStart() {
+    if (liveBusy || busy) {
       return;
     }
 
-
-    setBusy(
-      true,
-    );
-
+    setLiveBusy(true);
     setError("");
+    setAgentState(null);
+    setSelectedCandidateId(null);
 
+    const result = await startLiveReplay({
+      stopAtMinute: LIVE_REPLAY_END_MIN,
+      resetFirst: true,
+    });
 
-    setAgentState(
-      null,
-    );
-
-
-    setSelectedCandidateId(
-      null,
-    );
-
-    if (offlineMode) {
-      const demoState = createOfflineAgentState();
-      setAgentState(demoState);
-      setDashboard(normalizeAgentState(demoState));
-      setSelectedCandidateId("ALT-D");
-      setBusy(false);
-      return;
-    }
-
-
-    const reset =
-      await resetCopilot();
-
-
-    if (!reset.ok) {
-      setBusy(false);
-      setOfflineMode(true);
-      const demoState = createOfflineAgentState();
-      setAgentState(demoState);
-      setDashboard(normalizeAgentState(demoState));
-      setSelectedCandidateId("ALT-D");
-      setError("Backend reset failed. AERIS switched to the deterministic offline presentation path.");
-      return;
-    }
-
-
-    const runId =
-      `WEB-${Date.now()}`;
-
-
-    const result =
-      await runCopilotRecommendation(
-        {
-          target_flight_id:
-            TARGET_FLIGHT_ID,
-
-          scenario_id:
-            FLAGSHIP_SCENARIO_ID,
-
-          decision_time_min:
-            FLAGSHIP_DECISION_TIME_MIN,
-
-          run_id:
-            runId,
-        },
-      );
-
-
-    setBusy(
-      false,
-    );
-
+    setLiveBusy(false);
 
     if (!result.ok) {
-      setOfflineMode(true);
-      const demoState = createOfflineAgentState();
-      setAgentState(demoState);
-      setDashboard(normalizeAgentState(demoState));
-      setSelectedCandidateId("ALT-D");
-      setError("Live recommendation failed. AERIS switched to the deterministic offline presentation path.");
+      setError(
+        result.error ||
+          "Unable to start the live operational replay.",
+      );
       return;
     }
 
+    reconnectLive();
 
-    const state =
-      result.data;
+    if (result.data) {
+      const airspace =
+        result.data.entities?.airspace?.CURRENT;
 
-
-    setAgentState(
-      state,
-    );
-
-
-    const normalized =
-      normalizeAgentState(
-        state,
-      );
-
-
-    setDashboard(
-      normalized,
-    );
-
-
-    setSelectedCandidateId(
-      normalized
-        .recommendation
-        ?.candidateId ||
-        null,
-    );
+      if (airspace) {
+        setDashboard(
+          normalizeBaseline({
+            airspace,
+            disruptions: {
+              weather_cells:
+                airspace.weather_cells || [],
+              restrictions:
+                airspace.restrictions || [],
+            },
+            flight:
+              (airspace.aircraft || []).find(
+                (flight) =>
+                  flight.id === TARGET_FLIGHT_ID,
+              ),
+          }),
+        );
+      }
+    }
   }
 
 
+  async function handleLiveStop() {
+    if (liveBusy) {
+      return;
+    }
+
+    setLiveBusy(true);
+    const result = await stopLiveReplay();
+    setLiveBusy(false);
+
+    if (!result.ok) {
+      setError(
+        result.error ||
+          "Unable to stop the live operational replay.",
+      );
+    }
+  }
+
+
+  async function handleLiveReset() {
+    if (liveBusy || busy) {
+      return;
+    }
+
+    setLiveBusy(true);
+    setError("");
+    setAgentState(null);
+    setSelectedCandidateId(null);
+
+    const result = await resetLiveReplay();
+    setLiveBusy(false);
+
+    if (!result.ok) {
+      setError(
+        result.error ||
+          "Unable to reset the live operational replay.",
+      );
+      return;
+    }
+
+    const airspace =
+      result.data?.entities?.airspace?.CURRENT;
+
+    if (airspace) {
+      setDashboard(
+        normalizeBaseline({
+          airspace,
+          disruptions: {
+            weather_cells:
+              airspace.weather_cells || [],
+            restrictions:
+              airspace.restrictions || [],
+          },
+          flight:
+            (airspace.aircraft || []).find(
+              (flight) =>
+                flight.id === TARGET_FLIGHT_ID,
+            ),
+        }),
+      );
+    }
+
+    reconnectLive();
+  }
+
+
+  async function runAerisAtTime(decisionTimeMin) {
+    if (busy || liveBusy) {
+      return;
+    }
+
+    const decisionTime = Number(decisionTimeMin);
+    if (!Number.isInteger(decisionTime) || decisionTime < 0 || decisionTime > 35) {
+      setError("Invalid AERIS decision time.");
+      return;
+    }
+
+    if (liveSnapshot?.running) {
+      const stopResult = await stopLiveReplay();
+      if (!stopResult.ok) {
+        setError(stopResult.error || "Unable to pause the live operational feed.");
+        return;
+      }
+    }
+
+    setBusy(true);
+    setError("");
+    setAgentState(null);
+    setSelectedCandidateId(null);
+
+    try {
+      const reset = await resetCopilot();
+      if (!reset.ok) {
+        setError(reset.error || "Unable to reset the AERIS decision engine.");
+        return;
+      }
+
+      const runId = `WEB-${Date.now()}-${decisionTime}`;
+      const result = await runCopilotRecommendation({
+        target_flight_id: TARGET_FLIGHT_ID,
+        scenario_id: FLAGSHIP_SCENARIO_ID,
+        decision_time_min: decisionTime,
+        run_id: runId,
+      });
+
+      if (!result.ok) {
+        setError(result.error || "AERIS recommendation failed.");
+        return;
+      }
+
+      const state = result.data;
+      setAgentState(state);
+
+      const normalized = normalizeAgentState(state);
+      setDashboard(normalized);
+      setSelectedCandidateId(normalized.recommendation?.candidateId || null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAeris() {
+    await runAerisAtTime(FLAGSHIP_DECISION_TIME_MIN);
+  }
+
+  async function handleLiveReassess() {
+    const liveTime = Number(liveSnapshot?.last_simulation_time_min);
+    if (!Number.isInteger(liveTime) || liveTime <= FLAGSHIP_DECISION_TIME_MIN) {
+      setError("Advance the live operational feed beyond T+19 before reassessing.");
+      return;
+    }
+
+    await runAerisAtTime(liveTime);
+  }
   async function handleApprove() {
     if (
       !agentState ||
@@ -635,15 +804,6 @@ function App() {
     );
 
     setError("");
-
-    if (offlineMode) {
-      const next = approveOfflineRun(agentState);
-      setAgentState(next);
-      setDashboard(normalizeAgentState(next));
-      setSelectedCandidateId("ALT-D");
-      setBusy(false);
-      return;
-    }
 
 
     const result =
@@ -664,11 +824,19 @@ function App() {
 
 
     if (!result.ok) {
-      setError(
-        result.error ||
-          "Approval failed.",
-      );
-
+      if (result.errorType === "NOT_FOUND") {
+        setAgentState(null);
+        setSelectedCandidateId(null);
+        await loadBaseline();
+        setError(
+          "This AERIS run is stale because the backend no longer has it. Run AERIS again.",
+        );
+      } else {
+        setError(
+          result.error ||
+            "Approval failed.",
+        );
+      }
 
       return;
     }
@@ -735,15 +903,6 @@ function App() {
 
     setError("");
 
-    if (offlineMode) {
-      const next = rejectOfflineRun(agentState, cleanReason);
-      setAgentState(next);
-      setDashboard(normalizeAgentState(next));
-      setSelectedCandidateId(next.recommendation?.candidate_id || "ALT-A");
-      setBusy(false);
-      return;
-    }
-
 
     const result =
       await rejectCopilotRun(
@@ -766,11 +925,19 @@ function App() {
 
 
     if (!result.ok) {
-      setError(
-        result.error ||
-          "Recommendation rejection failed.",
-      );
-
+      if (result.errorType === "NOT_FOUND") {
+        setAgentState(null);
+        setSelectedCandidateId(null);
+        await loadBaseline();
+        setError(
+          "This AERIS run is stale because the backend no longer has it. Run AERIS again.",
+        );
+      } else {
+        setError(
+          result.error ||
+            "Recommendation rejection failed.",
+        );
+      }
 
       return;
     }
@@ -925,10 +1092,12 @@ function App() {
           runAeris
         }
         disabled={
-          busy
+          busy ||
+          liveBusy
         }
-        offlineMode={offlineMode}
-        streamConnected={streamConnected}
+        backendStatus={
+          backendStatus
+        }
       />
 
 
@@ -940,7 +1109,6 @@ function App() {
           onRetry={
             loadBaseline
           }
-          offline={offlineMode}
         />
 
 
@@ -1057,6 +1225,39 @@ function App() {
           }
           rejectedCandidateId={
             dashboard.rejectedCandidateId
+          }
+        />
+
+
+        <LiveOperationsPanel
+          snapshot={
+            liveSnapshot
+          }
+          connected={
+            liveConnected
+          }
+          transport={
+            liveTransport
+          }
+          onStart={
+            handleLiveStart
+          }
+          onStop={
+            handleLiveStop
+          }
+          onReset={
+            handleLiveReset
+          }
+          onReassess={
+            handleLiveReassess
+          }
+          canReassess={
+            Number(liveSnapshot?.last_simulation_time_min ?? 0) >
+            FLAGSHIP_DECISION_TIME_MIN
+          }
+          busy={
+            liveBusy ||
+            busy
           }
         />
 

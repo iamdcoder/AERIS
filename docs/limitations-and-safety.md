@@ -59,9 +59,7 @@ This is a feature for demonstration and testing, not an assertion that real avia
 
 ## 6. WebSocket status
 
-The contract reserves a `/ws/airspace` interface, but the current uploaded backend source does not implement it. The current dashboard uses REST calls.
-
-Real-time streaming, reconnection logic and polling fallback should be described as future work until implemented.
+The current backend implements `/ws/operations`. The frontend prefers WebSocket transport and falls back to `GET /operations/live` polling when WebSocket is unavailable. This is a simulated operational stream for the hackathon, not a certified production aviation feed.
 
 ---
 

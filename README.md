@@ -10,48 +10,6 @@ AERIS is deliberately built as a **decision system, not a chatbot and not an aut
 
 ---
 
-
-## Fast submission setup
-
-### Backend (Windows PowerShell)
-
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-py -m pip install -r requirements.txt
-$env:PYTHONPATH = "backend;."
-uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
-```
-
-### Frontend
-
-Use a clean install from `frontend` so npm resolves the pinned dependency set:
-
-```powershell
-cd frontend
-npm ci
-npm run build
-npm run dev
-```
-
-Open `http://localhost:5173`. Set `VITE_API_BASE_URL` in the root `.env` only when the backend is not at `http://127.0.0.1:8000`.
-
-### One-command release proof
-
-From the repository root:
-
-```powershell
-$env:PYTHONPATH = "backend;."
-py -m pytest -q
-py scripts\run_agent_flagship.py
-```
-
-The flagship proof validates the local-vs-network reversal, critic challenge, human approval gate, verification, and rejection/reassessment path.
-
-### Resilience fallback
-
-The command center contains a clearly labeled deterministic offline fallback. If the backend or Gemini provider is unavailable during judging, the UI can still present the flagship decision lifecycle without silently claiming that the live backend executed it.
-
 ## What AERIS does
 
 The flagship system runs the following decision lifecycle:
@@ -198,6 +156,59 @@ This is the central AERIS story: **the final network-resilient choice is not the
 
 ---
 
+## Live operational data
+
+The flagship scenario is not the only input path.
+
+AERIS includes a deterministic **operational event replay** so the command center can receive changing airspace conditions instead of displaying a static snapshot.
+
+The replay emits normalized events such as:
+
+```text
+SURVEILLANCE_UPDATE
+WEATHER_UPDATE
+SECTOR_CAPACITY_UPDATE
+AIRPORT_CAPACITY_UPDATE
+TRAFFIC_UPDATE
+RESTRICTION_UPDATE
+FLIGHT_STATE_UPDATE
+SYSTEM_ALERT
+```
+
+The frontend receives these events through:
+
+```text
+WebSocket /ws/operations
+```
+
+with an automatic REST polling fallback through:
+
+```text
+GET /operations/live
+```
+
+The live feed advances an isolated deterministic operational twin through the T+35 monitoring timeline. The flagship decision point remains T+19. This is intentionally a **simulated operational feed** for the hackathon. It does not claim privileged production access to AAI, airline, ATC or meteorological systems.
+
+The production integration boundary is:
+
+```text
+authorized source
+      ↓
+OperationalEvent
+      ↓
+OperationalStateStore
+      ↓
+AERIS deterministic engine
+      ↓
+agentic decision loop
+```
+
+This means future external data adapters can replace the replay without requiring a rewrite of the decision engine or agent layer.
+
+When the simulated feed moves beyond T+19, the dashboard can **reassess current conditions**. AERIS uses that simulation minute to create a fresh authoritative decision snapshot and reruns the existing recommendation pipeline. This demonstrates the intended “conditions change → decision re-check” behavior without claiming production access to live aviation feeds.
+
+---
+
 ## Architecture at a glance
 
 ```text
@@ -206,7 +217,7 @@ This is the central AERIS story: **the final network-resilient choice is not the
                            |  AERIS Command Center|
                            +----------+-----------+
                                       |
-                              REST / HTTP
+                              REST / HTTP + WebSocket
                                       |
                                       v
                            +----------+-----------+
@@ -267,6 +278,32 @@ The agent is responsible for:
 - synthesizing the recommendation;
 - explaining the operational trade-offs;
 - requesting explicit human approval.
+
+---
+
+## Running the live operational replay
+
+From the repository root:
+
+```bash
+python scripts/run_live_replay.py
+```
+
+For the browser dashboard, run the backend and frontend separately:
+
+```bash
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
+```
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the Vite URL shown in the terminal, then use **START LIVE FEED**. The operational feed advances the deterministic Mumbai scenario minute-by-minute and can replay through the T+35 monitoring point; the flagship decision point remains T+19.
+
+The browser uses WebSocket transport at `/ws/operations` when available and automatically falls back to `/operations/live` polling.
 
 ---
 
@@ -416,7 +453,7 @@ For local frontend-to-backend communication:
 
 ```text
 VITE_API_BASE_URL=http://127.0.0.1:8000
-VITE_WS_URL=ws://127.0.0.1:8000/ws/airspace
+VITE_OPERATIONS_WS_URL=ws://127.0.0.1:8000/ws/operations
 ```
 
 The current application is REST-driven. The WebSocket address is retained as a planned/contracted interface; the uploaded source snapshot does not currently expose a backend WebSocket route.
@@ -613,7 +650,7 @@ At review time, the deterministic Python regression suites pass as follows:
 ```text
 Backend suite : 272 passed
 Copilot suite : 121 passed, 5 skipped
-Combined      : 394 passed, 5 skipped
+Combined      : 393 passed, 5 skipped
 Flagship CLI  : SUCCESS / ALT-D / VERIFIED
 Agent proof   : SUCCESS / ALT-D / VERIFIED
 ```

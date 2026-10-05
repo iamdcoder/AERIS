@@ -35,7 +35,7 @@ _BACKEND = os.path.join(_REPO_ROOT, "backend")
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
-from app.engine import public  # noqa: E402 — path manipulation above is intentional
+from backend.app.engine import public  # noqa: E402 — path manipulation above is intentional
 
 
 # ─────────────────────────────────────────────────────────────────────────────

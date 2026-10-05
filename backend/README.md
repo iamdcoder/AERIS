@@ -64,7 +64,3 @@ python -m pytest backend/tests -q
 ```
 
 The latest user-verified backend suite completed with 272 passed and one deprecation warning from the test client dependency stack.
-
-## Realtime stream
-
-`/ws/airspace` provides deterministic state snapshots and lightweight `ping`, `snapshot`, and `advance` control messages for the command center. REST endpoints remain authoritative.
