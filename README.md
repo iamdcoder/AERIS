@@ -6,6 +6,10 @@ AERIS is a **human-supervised agentic decision-support system for aviation opera
 
 AERIS is a **decision-support prototype, not a chatbot and not an autonomous air-traffic control system**. The deterministic airspace engine is authoritative for operational feasibility, physical constraints, simulation and verification. The agent coordinates investigation, invokes controlled tools, compares evidence, uses an adversarial critic to challenge the leading option, synthesizes a recommendation, and stops for explicit human approval before execution.
 
+Live Deployment: https://aeris-frontend-v9ji.onrender.com/
+
+Live Demo: https://youtu.be/pxSoBqND1tE
+
 > **Core idea:** the best route for one aircraft is not necessarily the best intervention for the network.
 
 ---
