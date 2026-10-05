@@ -15,7 +15,7 @@ The recommended demo length is approximately four to six minutes.
 Start the backend:
 
 ```bash
-python -m uvicorn backend.app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
 ```
 
 Start the frontend:
@@ -26,6 +26,9 @@ npm run dev
 ```
 
 Check the browser dashboard and make sure the backend status indicator is healthy.
+
+Keep this as a single backend process for the presentation. Do not add `--workers`; the active human-approval gate is intentionally held in process memory.
+
 
 For a deterministic judging environment, prefer the known flagship scenario and avoid changing scenario data during the live presentation.
 

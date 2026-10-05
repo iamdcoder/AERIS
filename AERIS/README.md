@@ -465,14 +465,16 @@ The backend exposes `WS /ws/operations` for the simulated operational feed. The 
 From the repository root:
 
 ```bash
-python -m uvicorn backend.app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
 ```
 
 Windows PowerShell alternative:
 
 ```powershell
-python -m uvicorn backend.app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
 ```
+
+For the judge/demo run, keep exactly one Uvicorn process and do not use `--reload` or multiple workers: AERIS keeps the active human-approval gate in memory for the live submission flow.
 
 The backend should be available at:
 

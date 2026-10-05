@@ -98,3 +98,60 @@ def test_real_orchestrator_uses_authoritative_engine_evidence():
         .local_vs_global_flip
         is True
     )
+
+def test_approval_gate_recovers_if_controller_state_is_recreated():
+    engine = RealEngineClient()
+    engine.reset_engine()
+    engine.advance_simulation(19)
+
+    orchestrator = AgentOrchestrator(
+        engine_client=engine
+    )
+
+    state = orchestrator.run_mock_preview(
+        run_id="RECOVERY-APPROVAL-001",
+        target_flight_id="F102",
+    )
+
+    assert state.approval.decision == "PENDING"
+    assert orchestrator.approval_controller.is_pending is True
+
+    # Simulate a transient in-memory controller reset while the authoritative
+    # AgentState still says that human approval is pending.
+    orchestrator.approval_controller.clear()
+
+    approved = orchestrator.approve_current_recommendation(
+        decided_by="demo_dispatcher"
+    )
+
+    assert approved.approval.decision == "APPROVED"
+    assert approved.status.value == "COMPLETED"
+    assert approved.verification_result is not None
+
+
+def test_rejection_gate_recovers_if_controller_state_is_recreated():
+    engine = RealEngineClient()
+    engine.reset_engine()
+    engine.advance_simulation(19)
+
+    orchestrator = AgentOrchestrator(
+        engine_client=engine
+    )
+
+    state = orchestrator.run_mock_preview(
+        run_id="RECOVERY-REJECT-001",
+        target_flight_id="F102",
+    )
+
+    assert state.approval.decision == "PENDING"
+
+    orchestrator.approval_controller.clear()
+
+    rejected = orchestrator.reject_current_recommendation(
+        reason="Dispatcher wants reassessment.",
+        decided_by="demo_dispatcher",
+    )
+
+    assert rejected.approval.decision == "REJECTED"
+    assert rejected.stage.value == "DEGRADED"
+    assert rejected.recommendation is None

@@ -295,6 +295,41 @@ def test_rejection_creates_new_human_approval_cycle(
     )
 
 
+def test_approval_survives_recreated_in_memory_human_gate(
+    client,
+):
+    run_id = "API-TEST-RECOVER-001"
+
+    recommendation = client.post(
+        "/copilot/recommend",
+        json=request_payload(run_id),
+    )
+
+    assert recommendation.status_code == 200
+    assert recommendation.json()["approval"]["decision"] == "PENDING"
+
+    with copilot_routes._RUNS_LOCK:
+        orchestrator = copilot_routes._RUNS[run_id]
+
+    # Simulate the transient controller-state loss that can occur while the
+    # API process remains alive. AgentState remains the authoritative pending
+    # decision record and should allow the human gate to be recovered safely.
+    orchestrator.approval_controller.clear()
+
+    response = client.post(
+        "/copilot/approve",
+        json={
+            "run_id": run_id,
+            "decided_by": "demo_dispatcher",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["approval"]["decision"] == "APPROVED"
+    assert body["verification_result"]["status"] == "VERIFIED"
+
+
 def test_unknown_run_cannot_be_approved(
     client,
 ):

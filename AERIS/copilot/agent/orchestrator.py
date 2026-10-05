@@ -1513,6 +1513,48 @@ class AgentOrchestrator:
             )
         )
 
+    def _restore_pending_approval_if_needed(
+        self,
+        state: AgentState,
+    ) -> bool:
+        """Recover the in-memory human gate from authoritative AgentState.
+
+        The browser may keep a recommendation on screen while the short-lived
+        approval controller has been recreated or otherwise lost its active
+        request (for example after a hot reload or a transient lifecycle
+        reset). The decision state already records that human approval is
+        pending, so it is safe to reconstruct the gate instead of making the
+        operator rerun the entire investigation.
+        """
+        if self.approval_controller.is_pending:
+            return True
+
+        if state.approval.decision not in (None, "PENDING"):
+            return False
+
+        recommendation = state.recommendation
+        if recommendation is None or not recommendation.candidate_id:
+            return False
+
+        recommendation_id = None
+        for event in reversed(state.events):
+            if event.event_type != "HUMAN_APPROVAL_REQUIRED":
+                continue
+            recommendation_id = event.data.get("recommendation_id")
+            if recommendation_id:
+                break
+
+        if not recommendation_id:
+            recommendation_id = f"{state.run_id}:REC:RECOVERED"
+
+        self.approval_controller.request(
+            recommendation_id=recommendation_id,
+            candidate_id=recommendation.candidate_id,
+            target_flight_id=state.target_flight_id,
+            explanation=recommendation.summary,
+        )
+        return True
+
     def approve_current_recommendation(
         self,
         *,
@@ -1526,6 +1568,11 @@ class AgentOrchestrator:
             )
 
         state = self._active_state
+
+        if not self._restore_pending_approval_if_needed(state):
+            raise RuntimeError(
+                "There is no pending human approval request."
+            )
 
         record = (
             self.approval_controller.approve(
@@ -1729,6 +1776,11 @@ class AgentOrchestrator:
             )
 
         state = self._active_state
+
+        if not self._restore_pending_approval_if_needed(state):
+            raise RuntimeError(
+                "There is no pending human approval request."
+            )
 
         record = (
             self.approval_controller.reject(
