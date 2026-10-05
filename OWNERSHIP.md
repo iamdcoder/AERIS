@@ -4,7 +4,7 @@
 
 The repository was originally divided into two major ownership islands.
 
-### Person 1 — Airspace Intelligence Engineer
+### Harsh — Airspace Intelligence Engineer
 
 Primary area:
 
@@ -29,7 +29,7 @@ Typical responsibilities:
 - deterministic metrics;
 - engine execution / verification state.
 
-### Person 2 — Agent + Product Engineer
+### Devansh — Agent + Product Engineer
 
 Primary area:
 
