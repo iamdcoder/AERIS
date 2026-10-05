@@ -1,0 +1,7 @@
+{
+  "airports": [
+    {"id":"BOM","name":"Chhatrapati Shivaji Maharaj International Airport","lat":19.0896,"lon":72.8656,"arrival_capacity":18,"normal_arrival_capacity":18,"departure_capacity":24,"weather_status":"MONSOON_ALERT","operational_status":"NORMAL"},
+    {"id":"PNQ","name":"Pune Airport","lat":18.5820,"lon":73.9197,"arrival_capacity":14,"normal_arrival_capacity":14,"departure_capacity":14,"weather_status":"NORMAL","operational_status":"NORMAL"},
+    {"id":"AMD","name":"Sardar Vallabhbhai Patel International Airport","lat":23.0732,"lon":72.6347,"arrival_capacity":20,"normal_arrival_capacity":20,"departure_capacity":20,"weather_status":"NORMAL","operational_status":"NORMAL"}
+  ]
+}

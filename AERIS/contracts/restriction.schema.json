@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aeris/restriction",
+  "type": "object",
+  "required": ["id", "region", "active_from_min", "active_to_min", "reason"],
+  "properties": {
+    "id": {"type": "string"}, "region": {"type": "object"}, "min_altitude_ft": {"type": "number"},
+    "max_altitude_ft": {"type": "number"}, "active_from_min": {"type": "integer"}, "active_to_min": {"type": "integer"},
+    "reason": {"type": "string"}
+  }
+}
