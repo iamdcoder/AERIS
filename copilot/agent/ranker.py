@@ -19,6 +19,8 @@ class RankedCandidate(BaseModel):
     rank: int
     candidate_id: str
     feasible: bool
+    recommendable: bool
+    recommendation_blockers: List[str] = Field(default_factory=list)
     score: float
     decision_regret: float
     local_regret: float
@@ -37,6 +39,7 @@ class RankingSummary(BaseModel):
     runner_up_candidate_id: Optional[str] = None
     score_gap: float = 0.0
     local_vs_global_flip: bool = False
+    recommendable_candidate_ids: List[str] = Field(default_factory=list)
     ranked_candidates: List[RankedCandidate] = Field(default_factory=list)
     rationale: str
 
@@ -53,6 +56,16 @@ class DecisionRanker:
 
     def __init__(self, scorer: Optional[DecisionScorer] = None) -> None:
         self.scorer = scorer or DecisionScorer()
+
+    # These boundaries already exist in the deterministic stress-test engine:
+    # scenario survival rejects network delay above 25 min or sector utilization
+    # above 100%. The reassessment policy reuses those boundaries rather than
+    # inventing a separate safety model. A candidate that is technically
+    # feasible but fails these network-resilience gates is not recommendable.
+    MAX_NETWORK_DELAY_DELTA_MIN = 25.0
+    MAX_PEAK_SECTOR_UTILIZATION = 1.0
+    ZERO_SURVIVAL_BLOCKS = True
+    HIGH_REINTERVENTION_PROBABILITY = 0.80
 
     def rank(
         self,
@@ -80,6 +93,33 @@ class DecisionRanker:
             simulations=simulations,
             stress_tests=stress_tests,
         )
+
+        candidate_by_id = {
+            self._candidate_id(candidate): candidate
+            for candidate in candidate_list
+        }
+        for item in result.scores:
+            self._apply_recommendation_policy(item)
+            source_candidate = candidate_by_id.get(item.candidate_id)
+            if source_candidate is not None:
+                source_candidate["recommendable"] = item.recommendable
+                source_candidate["recommendation_blockers"] = list(
+                    item.recommendation_blockers
+                )
+
+        result.ranked_candidate_ids = [
+            item.candidate_id
+            for item in sorted(
+                result.scores,
+                key=lambda item: (
+                    not item.recommendable,
+                    not item.feasible,
+                    -item.score if item.recommendable else 0.0,
+                    self._network_ripple(item),
+                    item.candidate_id,
+                ),
+            )
+        ]
 
         ranked = [
             {
@@ -142,11 +182,26 @@ class DecisionRanker:
                 )
             )
 
+        candidate_by_id = {
+            self._candidate_id(candidate): candidate
+            for candidate in candidates
+        }
+
+        for item in scores:
+            self._apply_recommendation_policy(item)
+            source_candidate = candidate_by_id.get(item.candidate_id)
+            if source_candidate is not None:
+                source_candidate["recommendable"] = item.recommendable
+                source_candidate["recommendation_blockers"] = list(
+                    item.recommendation_blockers
+                )
+
         ranked_scores = sorted(
             scores,
             key=lambda item: (
+                not item.recommendable,
                 not item.feasible,
-                -item.score if item.feasible else 0.0,
+                -item.score if item.recommendable else 0.0,
                 self._network_ripple(item),
                 item.candidate_id,
             ),
@@ -230,26 +285,31 @@ class DecisionRanker:
             for candidate in ranked_candidates
             if candidate.feasible
         ]
+        recommendable = [
+            candidate
+            for candidate in ranked_candidates
+            if candidate.recommendable
+        ]
 
         recommended_id = (
-            feasible[0].candidate_id
-            if feasible
+            recommendable[0].candidate_id
+            if recommendable
             else None
         )
 
         runner_up_id = (
-            feasible[1].candidate_id
-            if len(feasible) > 1
+            recommendable[1].candidate_id
+            if len(recommendable) > 1
             else None
         )
 
         score_gap = (
             round(
-                feasible[0].score
-                - feasible[1].score,
+                recommendable[0].score
+                - recommendable[1].score,
                 4,
             )
-            if len(feasible) > 1
+            if len(recommendable) > 1
             else 0.0
         )
 
@@ -264,9 +324,14 @@ class DecisionRanker:
             runner_up_candidate_id=runner_up_id,
             score_gap=score_gap,
             local_vs_global_flip=local_vs_global_flip,
+            recommendable_candidate_ids=[
+                item.candidate_id
+                for item in recommendable
+            ],
             ranked_candidates=ranked_candidates,
             rationale=self._build_rationale(
                 feasible_ranked=feasible,
+                recommendable_ranked=recommendable,
                 local_vs_global_flip=local_vs_global_flip,
                 score_gap=score_gap,
             ),
@@ -541,6 +606,62 @@ class DecisionRanker:
             explanation=explanation,
         )
 
+    @classmethod
+    def _apply_recommendation_policy(
+        cls,
+        item: CandidateDecisionScore,
+    ) -> None:
+        """Separate hard feasibility from recommendation eligibility.
+
+        The deterministic constraint engine remains authoritative for whether
+        a candidate is feasible. This gate only prevents operationally fragile
+        candidates from being promoted during ranking/reassessment.
+        """
+        blockers: list[str] = []
+        if not item.feasible:
+            item.recommendable = False
+            item.recommendation_blockers = [
+                "Hard constraints failed."
+            ]
+            return
+
+        metrics = item.raw_metrics
+        peak = metrics.peak_sector_utilization
+        if peak is not None and peak > cls.MAX_PEAK_SECTOR_UTILIZATION:
+            blockers.append(
+                f"Peak sector utilization {peak:.1%} exceeds 100%."
+            )
+
+        network_delay = metrics.network_delay_delta_min
+        if (
+            network_delay is not None
+            and network_delay > cls.MAX_NETWORK_DELAY_DELTA_MIN
+        ):
+            blockers.append(
+                f"Network delay delta {network_delay:.1f} min exceeds the 25.0 min stress boundary."
+            )
+
+        if (
+            cls.ZERO_SURVIVAL_BLOCKS
+            and metrics.stress_total
+            and metrics.stress_total > 0
+            and (metrics.stress_passed or 0) == 0
+        ):
+            blockers.append(
+                "Candidate failed every evaluated future stress scenario (0% survival)."
+            )
+
+        if (
+            metrics.second_intervention_probability is not None
+            and metrics.second_intervention_probability >= cls.HIGH_REINTERVENTION_PROBABILITY
+        ):
+            blockers.append(
+                f"Estimated second-intervention probability is {metrics.second_intervention_probability:.0%}."
+            )
+
+        item.recommendable = not blockers
+        item.recommendation_blockers = blockers
+
     def _fallback_infeasible_score(
         self,
         candidate: Mapping[str, Any],
@@ -552,6 +673,10 @@ class DecisionRanker:
         return CandidateDecisionScore(
             candidate_id=candidate_id,
             feasible=False,
+            recommendable=False,
+            recommendation_blockers=[
+                "Hard constraints failed."
+            ],
             score=0.0,
             components=ScoreComponents(
                 target_flight_benefit=0.0,
@@ -797,6 +922,10 @@ class DecisionRanker:
             rank=rank,
             candidate_id=item.candidate_id,
             feasible=item.feasible,
+            recommendable=item.recommendable,
+            recommendation_blockers=list(
+                item.recommendation_blockers
+            ),
             score=item.score,
             decision_regret=item.decision_regret,
             local_regret=item.local_regret,
@@ -864,6 +993,7 @@ class DecisionRanker:
     @staticmethod
     def _build_rationale(
         feasible_ranked: List[RankedCandidate],
+        recommendable_ranked: List[RankedCandidate],
         local_vs_global_flip: bool,
         score_gap: float,
     ) -> str:
@@ -873,15 +1003,28 @@ class DecisionRanker:
                 "AERIS must not recommend an intervention."
             )
 
-        winner = feasible_ranked[0]
+        if not recommendable_ranked:
+            blocked = "; ".join(
+                f"{item.candidate_id}: {', '.join(item.recommendation_blockers)}"
+                for item in feasible_ranked
+                if item.recommendation_blockers
+            )
+            return (
+                "No recommendable candidate is available. Hard-feasible "
+                "candidates remain, but the network-resilience policy blocks "
+                "promotion of the available options."
+                + (f" Blockers: {blocked}." if blocked else "")
+            )
 
-        if len(feasible_ranked) == 1:
+        winner = recommendable_ranked[0]
+
+        if len(recommendable_ranked) == 1:
             base = (
                 f"{winner.candidate_id} is the only "
-                "feasible candidate."
+                "recommendable candidate."
             )
         else:
-            runner = feasible_ranked[1]
+            runner = recommendable_ranked[1]
 
             base = (
                 f"{winner.candidate_id} leads with an "

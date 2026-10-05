@@ -17,8 +17,15 @@ export default function ApprovalPanel({
 
 
   const pending =
-    approvalStatus ===
-    "PENDING";
+    [
+      "PENDING",
+      "AWAITING_APPROVAL",
+    ].includes(
+      String(
+        approvalStatus ||
+          "PENDING",
+      ).toUpperCase(),
+    );
 
   const approved =
     approvalStatus ===
@@ -279,7 +286,7 @@ export default function ApprovalPanel({
                 onApprove
               }
             >
-              APPROVE &amp; EXECUTE
+              APPROVE SIMULATED INTERVENTION
             </button>
 
 

@@ -31,11 +31,10 @@ import sys
 
 # Ensure the backend package is importable when run from the repo root.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_BACKEND = os.path.join(_REPO_ROOT, "backend")
-if _BACKEND not in sys.path:
-    sys.path.insert(0, _BACKEND)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
-from backend.app.engine import public  # noqa: E402 — path manipulation above is intentional
+from backend.app.engine import public  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────

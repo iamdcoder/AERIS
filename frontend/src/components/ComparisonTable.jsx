@@ -84,11 +84,13 @@ export default function ComparisonTable({
       (candidate) =>
         candidate.id ===
           selectedId &&
+        candidate.recommendable !== false &&
         !candidate.operatorRejected,
     ) ||
     candidates.find(
       (candidate) =>
         candidate.feasible &&
+        candidate.recommendable !== false &&
         !candidate.operatorRejected,
     ) ||
     null;
@@ -199,18 +201,20 @@ export default function ComparisonTable({
                     <td>
                       <span
                         className={`table-status ${
-                          operatorRejected
+                          operatorRejected || !candidate.feasible
                             ? "bad"
-                            : candidate.feasible
-                              ? "good"
-                              : "bad"
+                            : candidate.recommendable === false
+                              ? "warn"
+                              : "good"
                         }`}
                       >
                         {operatorRejected
                           ? "REJECTED"
-                          : candidate.feasible
-                            ? "PASS"
-                            : "FAIL"}
+                          : !candidate.feasible
+                            ? "HARD INVALID"
+                            : candidate.recommendable === false
+                              ? "FEASIBLE · BLOCKED"
+                              : "RECOMMENDABLE"}
                       </span>
                     </td>
 

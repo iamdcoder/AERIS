@@ -840,6 +840,12 @@ button {
   border: 1px solid rgba(255, 115, 115, 0.2);
 }
 
+.feasibility-badge.blocked {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px solid rgba(255, 194, 102, 0.2);
+}
+
 .candidate-score-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1120,6 +1126,11 @@ tbody tr:hover {
 .table-status.bad {
   color: var(--danger);
   background: var(--danger-soft);
+}
+
+.table-status.warn {
+  color: var(--warning);
+  background: var(--warning-soft);
 }
 
 .positive {

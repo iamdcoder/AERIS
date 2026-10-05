@@ -30,3 +30,5 @@ The repository also contains:
 - `OWNERSHIP.md` — original two-person ownership boundaries.
 - `CONTRIBUTING.md` — repository contribution rules.
 - `scripts/README.md` — utility script documentation.
+
+- [`submission-preflight.md`](submission-preflight.md) — final one-command submission gate.

@@ -264,28 +264,70 @@ def test_rejection_creates_new_human_approval_cycle(
     body = response.json()
 
     assert body["stage"] == (
-        "HUMAN_APPROVAL"
+        "DEGRADED"
     )
 
     assert body["status"] == (
-        "WAITING_HUMAN"
+        "DEGRADED"
     )
 
     assert (
         body["approval"]["decision"]
-        == "PENDING"
+        == "REJECTED"
     )
 
     assert (
         body["recommendation"]
-        is not None
+        is None
     )
 
+    assert body["leading_candidate_id"] is None
+
+    no_robust = [
+        event
+        for event in body["events"]
+        if event["event_type"] == "NO_ROBUST_INTERVENTION"
+    ]
+    assert no_robust
     assert (
-        body["recommendation"]
-        ["candidate_id"]
-        != "ALT-D"
+        no_robust[-1]["data"]["status"]
+        == "NO_ROBUST_INTERVENTION_AVAILABLE"
     )
+
+
+def test_approval_survives_recreated_in_memory_human_gate(
+    client,
+):
+    run_id = "API-TEST-RECOVER-001"
+
+    recommendation = client.post(
+        "/copilot/recommend",
+        json=request_payload(run_id),
+    )
+
+    assert recommendation.status_code == 200
+    assert recommendation.json()["approval"]["decision"] == "PENDING"
+
+    with copilot_routes._RUNS_LOCK:
+        orchestrator = copilot_routes._RUNS[run_id]
+
+    # Simulate the transient controller-state loss that can occur while the
+    # API process remains alive. AgentState remains the authoritative pending
+    # decision record and should allow the human gate to be recovered safely.
+    orchestrator.approval_controller.clear()
+
+    response = client.post(
+        "/copilot/approve",
+        json={
+            "run_id": run_id,
+            "decided_by": "demo_dispatcher",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["approval"]["decision"] == "APPROVED"
+    assert body["verification_result"]["status"] == "VERIFIED"
 
 
 def test_unknown_run_cannot_be_approved(
@@ -390,3 +432,49 @@ def test_reset_clears_active_runs(
     )
 
     assert response.status_code == 404
+
+def test_duplicate_approval_is_idempotent(client):
+    run_id = "API-TEST-DUP-APPROVE"
+
+    recommendation = client.post(
+        "/copilot/investigate",
+        json=request_payload(run_id),
+    )
+    assert recommendation.status_code == 200
+
+    payload = {
+        "run_id": run_id,
+        "decided_by": "demo_dispatcher",
+    }
+
+    first = client.post("/copilot/approve", json=payload)
+    second = client.post("/copilot/approve", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["approval"]["decision"] == "APPROVED"
+    assert second.json()["status"] == "COMPLETED"
+
+
+def test_duplicate_degraded_rejection_is_idempotent(client):
+    run_id = "API-TEST-DUP-REJECT"
+
+    recommendation = client.post(
+        "/copilot/investigate",
+        json=request_payload(run_id),
+    )
+    assert recommendation.status_code == 200
+
+    payload = {
+        "run_id": run_id,
+        "reason": "Dispatcher rejects this recommendation.",
+        "decided_by": "demo_dispatcher",
+    }
+
+    first = client.post("/copilot/reject", json=payload)
+    second = client.post("/copilot/reject", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["approval"]["decision"] == "REJECTED"
+    assert second.json()["status"] == "DEGRADED"

@@ -5,7 +5,7 @@
 From the repository root:
 
 ```bash
-PYTHONPATH=backend uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --reload
 ```
 
 Interactive documentation is available at:
@@ -223,6 +223,18 @@ Resets the deterministic simulation state and clears the in-memory copilot run s
 
 ---
 
+## 6. Operational feed transport
+
+### `WS /ws/operations`
+
+Streams the isolated deterministic operational replay. The backend sends versioned snapshots when the replay changes and heartbeat payloads between changes.
+
+### `GET /operations/live`
+
+Returns the current replay snapshot and is the frontend polling fallback when WebSocket is unavailable.
+
+The frontend should prefer WebSocket, reconnect when possible, and fall back to polling without changing the underlying operational state. This transport is a simulated hackathon feed, not a live AAI, airline, ATC or meteorological integration.
+
 ## 6. Error behavior
 
 The API uses standard FastAPI HTTP errors for common invalid lifecycle operations.
@@ -244,8 +256,6 @@ The copilot layer also returns structured internal tool errors and records them 
 
 ## 7. API contract note
 
-`contracts/api-contract.md` is the shared interface document. The current live operational transport is `WS /ws/operations`, with REST polling at `GET /operations/live` as a fallback.
+`contracts/api-contract.md` is the shared interface document. The current live operational transport is `WS /ws/operations`, with `GET /operations/live` as the polling fallback.
 
-The current uploaded backend source does not yet register a WebSocket route, so **REST is the currently implemented transport**.
-
-When the WebSocket interface is implemented, update this document and the contract together rather than silently changing one side.
+Both endpoints are implemented in the backend and read the same isolated operational replay state. Production deployments may set `VITE_OPERATIONS_WS_URL` explicitly when the frontend cannot derive the WebSocket URL from its API base URL.

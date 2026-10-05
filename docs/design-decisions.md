@@ -96,12 +96,12 @@ Judges need to see why the system acted. They do not need hidden internal reason
 
 ---
 
-## 9. REST-first current implementation
+## 9. WebSocket with REST polling fallback
 
 ### Decision
 
-Keep the current frontend/API workflow REST-based.
+Use the implemented `/ws/operations` feed as the preferred live transport, with `GET /operations/live` polling as the browser fallback.
 
 ### Reason
 
-It is simple, reliable and sufficient for the deterministic hackathon demo. WebSocket support remains a documented future interface until the backend route is actually implemented.
+The WebSocket route is useful for an event-driven command center, while REST polling keeps the product recoverable when a browser, proxy or deployment does not sustain a WebSocket connection. Both transports read the same isolated deterministic operational replay.

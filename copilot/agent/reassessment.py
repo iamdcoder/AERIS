@@ -234,7 +234,7 @@ class CandidateReassessor:
                 f"Human rejected {rejected_candidate_id}: "
                 f"{reason}. Remaining candidates "
                 f"({', '.join(remaining_ids)}) produced no "
-                "feasible recommendation."
+                "recommendable intervention under the network-resilience policy."
             )
 
         return (

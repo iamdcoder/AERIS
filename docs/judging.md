@@ -57,14 +57,18 @@ Use the local-vs-network contrast:
 
 ```text
 ALT-A
-Local score ~0.92
+Target delay +0.03 min
 Network +22.03 min
+Peak sector 130%
 Stress 0/5
+Re-intervention 100%
 
 ALT-D
-Local score ~0.66
+Target delay +4.49 min
 Network +12.49 min
+Peak sector 100%
 Stress 4/5
+Re-intervention 20%
 ```
 
 The actual copilot flagship proof records ALT-A as the preliminary/local leader, ALT-D as the network leader, and the critic challenging ALT-A before ALT-D is synthesized as the recommendation.
@@ -138,7 +142,7 @@ The first ranking can reflect current-state trade-offs. The critic intentionally
 
 ### “Can I reject the recommendation?”
 
-Yes. Rejection creates a reassessment cycle and a new human-approval state.
+Yes. Rejection creates a deterministic reassessment cycle. A new human-approval state is created only when a sufficiently robust remaining candidate survives the recommendation policy; otherwise AERIS fails closed with `NO_ROBUST_INTERVENTION_AVAILABLE`.
 
 ### “What if the LLM fails?”
 
@@ -161,4 +165,6 @@ The project is strongest when its claims remain precise.
 
 ## Reproducible proof scripts
 
-Use `PYTHONPATH=backend python scripts/run_flagship.py` for the deterministic engine proof and `PYTHONPATH=backend python scripts/run_agent_flagship.py` for the actual agent/coplilot proof. The latter asserts the local-vs-network reversal, critic challenge, approval gate, verification, and rejection/reassessment behavior.
+Use `python scripts/run_flagship.py` for the deterministic engine proof and `python scripts/run_agent_flagship.py` for the agentic proof. The latter asserts the local-vs-network reversal, critic challenge, approval gate, verification, and fail-closed rejection/reassessment behavior.
+
+For final submission, run `python scripts/preflight_submission.py` from repository root.

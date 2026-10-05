@@ -63,6 +63,10 @@ export default function CandidateCards({
                 true &&
               !operatorRejected;
 
+            const recommendable =
+              feasible &&
+              candidate.recommendable !== false;
+
             const disabled =
               operatorRejected ||
               !candidate.feasible;
@@ -122,16 +126,20 @@ export default function CandidateCards({
 
                   <div
                     className={`feasibility-badge ${
-                      feasible
-                        ? "pass"
-                        : "fail"
+                      operatorRejected || !feasible
+                        ? "fail"
+                        : recommendable
+                          ? "pass"
+                          : "blocked"
                     }`}
                   >
                     {operatorRejected
                       ? "REJECTED"
-                      : feasible
-                        ? "FEASIBLE"
-                        : "REJECTED"}
+                      : !feasible
+                        ? "HARD INVALID"
+                        : recommendable
+                          ? "RECOMMENDABLE"
+                          : "FEASIBLE · BLOCKED"}
                   </div>
                 </div>
 
@@ -196,7 +204,11 @@ export default function CandidateCards({
                         candidate.rejectionReason ||
                         "No reason recorded."
                       }`
-                    : candidate.summary}
+                    : !candidate.feasible
+                      ? candidate.summary
+                      : !recommendable
+                        ? `Not promoted for recommendation: ${(candidate.recommendationBlockers || []).join(" ") || "Fails the network-resilience recommendation policy."}`
+                        : candidate.summary}
                 </p>
 
 

@@ -247,8 +247,8 @@ It demonstrates:
 Use:
 
 ```bash
-PYTHONPATH=backend python scripts/run_flagship.py
-PYTHONPATH=backend python scripts/run_agent_flagship.py
+python scripts/run_flagship.py
+python scripts/run_agent_flagship.py
 ```
 
 The first runner proves the deterministic engine lifecycle. The second exercises the actual agent/coplilot API path and proves critic, approval, verification, and rejection/reassessment behavior. Both reset the synthetic scenario before execution.

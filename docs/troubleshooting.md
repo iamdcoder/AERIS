@@ -2,17 +2,15 @@
 
 ## 1. Backend import error
 
-Use the repository root and set `PYTHONPATH=backend`:
+Use the repository root; the packaged command uses the repository-root module path and needs no `PYTHONPATH` workaround:
 
 ```powershell
-$env:PYTHONPATH="backend"
-uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --reload
 ```
 
 For the flagship runner:
 
 ```powershell
-$env:PYTHONPATH="backend"
 python scripts/run_flagship.py
 ```
 
@@ -148,16 +146,23 @@ Verification should only become an active post-action concern after an approved 
 
 ---
 
-## 10. Rejection creates a new recommendation
+## 10. Rejection triggers reassessment
 
 This is expected behavior.
 
-The old candidate should become historically rejected, while the new recommendation should return to:
+The old candidate should become historically rejected. When a robust replacement remains, the new recommendation returns to:
 
 ```text
 HUMAN APPROVAL
 EXECUTION LOCKED
 VERIFICATION PENDING
+```
+
+When no remaining candidate satisfies the network-resilience recommendation policy, AERIS must instead enter:
+
+```text
+DEGRADED
+NO_ROBUST_INTERVENTION_AVAILABLE
 ```
 
 If a new recommendation is shown as already `EXECUTED` or `VERIFIED`, that is a state-isolation bug and should be treated as a regression.
@@ -184,5 +189,5 @@ Finally:
 
 ```bash
 cd ..
-PYTHONPATH=backend python scripts/run_flagship.py
+python scripts/run_flagship.py
 ```

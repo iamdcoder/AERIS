@@ -72,6 +72,8 @@ class ScoreComponents(BaseModel):
 class CandidateDecisionScore(BaseModel):
     candidate_id: str
     feasible: bool
+    recommendable: bool = True
+    recommendation_blockers: List[str] = Field(default_factory=list)
 
     score: float
 

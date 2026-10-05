@@ -8,7 +8,7 @@
 - The flagship agent path is reproducible and stops at human approval.
 - The flagship recommendation is produced by the actual deterministic engine and agent logic.
 - Human approval executes the selected intervention and verification returns `VERIFIED`.
-- Rejection produces a fresh recommendation and returns to the human-approval gate.
+- Rejection triggers deterministic reassessment; a new human-approval cycle is created only when a recommendable option remains, otherwise AERIS enters `DEGRADED / NO_ROBUST_INTERVENTION_AVAILABLE`.
 
 ### Runtime
 
@@ -39,13 +39,17 @@
 - Typography/readability pass is applied.
 - WebSocket reconnect lifecycle cleans up old sockets and prevents duplicate reconnect loops.
 - Header action semantics distinguish an active run from a pending human decision.
+- Feasible-but-fragile candidates are visibly distinguished from recommendable candidates.
+- Degraded reassessment does not invent a fallback recommendation.
+- Dashboard timeline events use backend-provided simulation time when available.
+- Dependency-free frontend adapter regression tests are included.
 
 ## Verification performed in this environment
 
 ```text
-Repository Python suite: 407 passed, 5 skipped
+Repository Python suite: 409 passed, 5 skipped
 Backend suite:           286 passed
-Copilot suite:           121 passed, 5 skipped
+Copilot suite:           123 passed, 5 skipped
 Agent flagship runner:   SUCCESS
 Live replay runner:      SUCCESS through T+35
 FastAPI /health:         HTTP 200
@@ -53,13 +57,23 @@ FastAPI /operations/live: HTTP 200
 Python compileall:       PASS
 ```
 
-The frontend production bundle could not be rebuilt in this environment because npm dependency installation could not complete without registry access. The committed frontend source and lockfile were preserved; run the normal frontend build on a machine with npm registry access:
+The frontend production bundle is currently blocked in this environment because `npm ci` timed out while accessing the package registry. The committed frontend source and lockfile were preserved; run the normal frontend build on a network-enabled machine:
 
 ```bash
 cd frontend
 npm ci
 npm run build
 ```
+
+## Submission preflight
+
+Run the single final gate from repository root:
+
+```bash
+python scripts/preflight_submission.py
+```
+
+It verifies Python compilation/tests, both flagship runners, live replay, API health and WebSocket connectivity, frontend adapter regression tests, documentation consistency and submission hygiene. It reports a missing frontend dependency as `BLOCKED BY ENVIRONMENT` rather than as a false pass.
 
 ## Hackathon limitation
 

@@ -316,3 +316,42 @@ def test_synthesizer_is_deterministic():
     )
 
     assert first.model_dump() == second.model_dump()
+
+def test_synthesizer_does_not_promote_nonrecommendable_critic_replacement():
+    (
+        score_result,
+        ranking,
+        simulations,
+        stress_tests,
+    ) = build_pipeline()
+
+    fragile = next(
+        item
+        for item in score_result.scores
+        if item.candidate_id == "ALT-C"
+    )
+    fragile.recommendable = False
+    fragile.recommendation_blockers = [
+        "Failed resilience policy in critic re-evaluation."
+    ]
+
+    critic_result = CriticResult(
+        candidate_id="ALT-D",
+        challenged=True,
+        challenge_severity="HIGH",
+        findings=[],
+        failure_modes_checked=[],
+        surviving_checks=[],
+        should_reconsider=True,
+        replacement_candidate_id="ALT-C",
+        summary="Critic proposed ALT-C, but policy blocks it.",
+    )
+
+    recommendation = DecisionSynthesizer().synthesize(
+        ranking=ranking,
+        score_result=score_result,
+        critic_result=critic_result,
+        target_flight_id="F102",
+    )
+
+    assert recommendation.candidate_id == "ALT-D"

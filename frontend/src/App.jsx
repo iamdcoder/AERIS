@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -439,6 +440,8 @@ function App() {
     false,
   );
 
+  const decisionActionRef = useRef(null);
+
 
   const [
     error,
@@ -793,178 +796,104 @@ function App() {
   async function handleApprove() {
     if (
       !agentState ||
-      busy
+      busy ||
+      decisionActionRef.current
     ) {
       return;
     }
 
-
-    setBusy(
-      true,
-    );
-
+    decisionActionRef.current = "APPROVE";
+    setBusy(true);
     setError("");
 
+    try {
+      const result = await approveCopilotRun({
+        run_id: agentState.run_id,
+        decided_by: "demo_dispatcher",
+      });
 
-    const result =
-      await approveCopilotRun(
-        {
-          run_id:
-            agentState.run_id,
-
-          decided_by:
-            "demo_dispatcher",
-        },
-      );
-
-
-    setBusy(
-      false,
-    );
-
-
-    if (!result.ok) {
-      if (result.errorType === "NOT_FOUND") {
-        setAgentState(null);
-        setSelectedCandidateId(null);
-        await loadBaseline();
-        setError(
-          "This AERIS run is stale because the backend no longer has it. Run AERIS again.",
-        );
-      } else {
-        setError(
-          result.error ||
-            "Approval failed.",
-        );
+      if (!result.ok) {
+        if (result.errorType === "NOT_FOUND") {
+          setAgentState(null);
+          setSelectedCandidateId(null);
+          await loadBaseline();
+          setError(
+            "This AERIS run is stale because the backend no longer has it. Run AERIS again.",
+          );
+        } else {
+          setError(result.error || "Approval failed.");
+        }
+        return;
       }
 
-      return;
-    }
+      setAgentState(result.data);
 
-
-    setAgentState(
-      result.data,
-    );
-
-
-    const normalized =
-      normalizeAgentState(
-        result.data,
+      const normalized = normalizeAgentState(result.data);
+      setDashboard(normalized);
+      setSelectedCandidateId(
+        normalized.recommendation?.candidateId || selectedCandidateId,
       );
-
-
-    setDashboard(
-      normalized,
-    );
-
-
-    setSelectedCandidateId(
-      normalized
-        .recommendation
-        ?.candidateId ||
-        selectedCandidateId,
-    );
+    } finally {
+      decisionActionRef.current = null;
+      setBusy(false);
+    }
   }
 
 
   async function handleReject(
     rejectionReason,
   ) {
-    const cleanReason =
-      String(
-        rejectionReason ||
-          "",
-      ).trim();
+    const cleanReason = String(rejectionReason || "").trim();
 
-
-    if (
-      !cleanReason
-    ) {
-      window.alert(
-        "A rejection reason is required.",
-      );
-
-
+    if (!cleanReason) {
+      window.alert("A rejection reason is required.");
       return;
     }
-
 
     if (
       !agentState ||
-      busy
+      busy ||
+      decisionActionRef.current
     ) {
       return;
     }
 
-
-    setBusy(
-      true,
-    );
-
+    decisionActionRef.current = "REJECT";
+    setBusy(true);
     setError("");
 
+    try {
+      const result = await rejectCopilotRun({
+        run_id: agentState.run_id,
+        reason: cleanReason,
+        decided_by: "demo_dispatcher",
+      });
 
-    const result =
-      await rejectCopilotRun(
-        {
-          run_id:
-            agentState.run_id,
-
-          reason:
-            cleanReason,
-
-          decided_by:
-            "demo_dispatcher",
-        },
-      );
-
-
-    setBusy(
-      false,
-    );
-
-
-    if (!result.ok) {
-      if (result.errorType === "NOT_FOUND") {
-        setAgentState(null);
-        setSelectedCandidateId(null);
-        await loadBaseline();
-        setError(
-          "This AERIS run is stale because the backend no longer has it. Run AERIS again.",
-        );
-      } else {
-        setError(
-          result.error ||
-            "Recommendation rejection failed.",
-        );
+      if (!result.ok) {
+        if (result.errorType === "NOT_FOUND") {
+          setAgentState(null);
+          setSelectedCandidateId(null);
+          await loadBaseline();
+          setError(
+            "This AERIS run is stale because the backend no longer has it. Run AERIS again.",
+          );
+        } else {
+          setError(result.error || "Recommendation rejection failed.");
+        }
+        return;
       }
 
-      return;
-    }
+      setAgentState(result.data);
 
-
-    setAgentState(
-      result.data,
-    );
-
-
-    const normalized =
-      normalizeAgentState(
-        result.data,
+      const normalized = normalizeAgentState(result.data);
+      setDashboard(normalized);
+      setSelectedCandidateId(
+        normalized.recommendation?.candidateId || null,
       );
-
-
-    setDashboard(
-      normalized,
-    );
-
-
-    setSelectedCandidateId(
-      normalized
-        .recommendation
-        ?.candidateId ||
-        null,
-    );
+    } finally {
+      decisionActionRef.current = null;
+      setBusy(false);
+    }
   }
 
 
@@ -1033,12 +962,18 @@ function App() {
     phase =
       "IDLE";
   } else if (
-    dashboard?.isReassessment ||
     dashboard?.agentStage ===
-      "HUMAN_APPROVAL"
+      "HUMAN_APPROVAL" &&
+    dashboard?.recommendation
   ) {
     phase =
       "WAITING_APPROVAL";
+  } else if (
+    dashboard?.agentStage ===
+      "DEGRADED"
+  ) {
+    phase =
+      "DEGRADED";
   } else if (
     dashboard?.verificationStatus ===
     "VERIFIED"
@@ -1060,11 +995,21 @@ function App() {
   const waitingForApproval =
     Boolean(
       agentState &&
-        dashboard?.agentStage ===
-          "HUMAN_APPROVAL" &&
         dashboard?.recommendation &&
-        approvalStatus ===
+        [
           "PENDING",
+          "AWAITING_APPROVAL",
+        ].includes(
+          String(
+            approvalStatus ||
+              "PENDING",
+          ).toUpperCase(),
+        ) &&
+        (
+          dashboard?.agentStage ===
+            "HUMAN_APPROVAL" ||
+          dashboard?.isReassessment
+        ),
     );
 
 
@@ -1121,9 +1066,15 @@ function App() {
             <strong>
               {busy
                 ? "AERIS INVESTIGATING..."
-                : dashboard.isReassessment
-                  ? "WAITING HUMAN"
-                  : dashboard.verificationStatus ===
+                : dashboard.agentStage ===
+                    "DEGRADED" &&
+                  dashboard.recommendation === null
+                  ? "NO ROBUST INTERVENTION AVAILABLE"
+                  : dashboard.agentStage ===
+                      "HUMAN_APPROVAL" &&
+                    dashboard.recommendation
+                    ? "WAITING HUMAN"
+                    : dashboard.verificationStatus ===
                       "VERIFIED"
                     ? "VERIFIED"
                     : agentState

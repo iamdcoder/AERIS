@@ -158,6 +158,7 @@ export default function DecisionEvidencePanel({
     candidates.find(
       (candidate) =>
         candidate.feasible &&
+        candidate.recommendable !== false &&
         !candidate.operatorRejected,
     ) ||
     null;
@@ -167,6 +168,7 @@ export default function DecisionEvidencePanel({
     candidates.filter(
       (candidate) =>
         candidate.feasible &&
+        candidate.recommendable !== false &&
         !candidate.operatorRejected,
     );
 
@@ -257,8 +259,14 @@ export default function DecisionEvidencePanel({
 
 
   const feasibleCount =
-    operationalCandidates.length;
+    candidates.filter(
+      (candidate) =>
+        candidate.feasible &&
+        !candidate.operatorRejected,
+    ).length;
 
+  const recommendableCount =
+    operationalCandidates.length;
 
   const infeasibleCount =
     candidates.filter(
@@ -270,6 +278,18 @@ export default function DecisionEvidencePanel({
   if (
     !recommended
   ) {
+    const noRobustIntervention =
+      String(
+        agentState?.stage ||
+          "",
+      ).toUpperCase() ===
+        "DEGRADED" &&
+      candidates.some(
+        (candidate) =>
+          candidate.feasible &&
+          candidate.recommendable === false,
+      );
+
     return (
       <section className="panel decision-evidence-panel">
         <div className="panel-heading">
@@ -279,7 +299,9 @@ export default function DecisionEvidencePanel({
             </span>
 
             <h2>
-              Why AERIS recommends
+              {noRobustIntervention
+                ? "No robust intervention available"
+                : "Why AERIS recommends"}
             </h2>
           </div>
         </div>
@@ -291,7 +313,9 @@ export default function DecisionEvidencePanel({
               "20px",
           }}
         >
-          Decision evidence will appear after AERIS completes candidate evaluation.
+          {noRobustIntervention
+            ? "AERIS failed closed after human rejection: the remaining hard-feasible candidates did not satisfy the deterministic network-resilience recommendation policy. MONITOR / COORDINATE / ESCALATE rather than forcing a fragile route."
+            : "Decision evidence will appear after AERIS completes candidate evaluation."}
         </div>
       </section>
     );
@@ -382,9 +406,9 @@ export default function DecisionEvidencePanel({
 
 
           <MetricBlock
-            label="Feasible set"
-            value={`${feasibleCount}/${candidates.length}`}
-            caption={`${infeasibleCount} candidate(s) failed hard constraints`}
+            label="Feasible / recommendable"
+            value={`${feasibleCount} / ${recommendableCount}`}
+            caption={`${infeasibleCount} failed hard constraints; ${Math.max(0, feasibleCount - recommendableCount)} feasible candidate(s) blocked by resilience policy`}
           />
         </div>
       </div>

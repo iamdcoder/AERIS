@@ -215,6 +215,13 @@ def post_approve(
             ),
         )
 
+    active_state = getattr(orchestrator, "_active_state", None)
+    if (
+        active_state is not None
+        and getattr(active_state.approval, "decision", None) == "APPROVED"
+    ):
+        return active_state.model_dump()
+
     try:
         state = (
             orchestrator
@@ -253,6 +260,14 @@ def post_reject(
                 "was not found."
             ),
         )
+
+    active_state = getattr(orchestrator, "_active_state", None)
+    if (
+        active_state is not None
+        and getattr(active_state.approval, "decision", None) == "REJECTED"
+        and getattr(active_state, "stage", None) == "DEGRADED"
+    ):
+        return active_state.model_dump()
 
     try:
         state = (
