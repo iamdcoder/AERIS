@@ -1033,12 +1033,18 @@ function App() {
     phase =
       "IDLE";
   } else if (
-    dashboard?.isReassessment ||
     dashboard?.agentStage ===
-      "HUMAN_APPROVAL"
+      "HUMAN_APPROVAL" &&
+    dashboard?.recommendation
   ) {
     phase =
       "WAITING_APPROVAL";
+  } else if (
+    dashboard?.agentStage ===
+      "DEGRADED"
+  ) {
+    phase =
+      "DEGRADED";
   } else if (
     dashboard?.verificationStatus ===
     "VERIFIED"
@@ -1131,9 +1137,15 @@ function App() {
             <strong>
               {busy
                 ? "AERIS INVESTIGATING..."
-                : dashboard.isReassessment
-                  ? "WAITING HUMAN"
-                  : dashboard.verificationStatus ===
+                : dashboard.agentStage ===
+                    "DEGRADED" &&
+                  dashboard.recommendation === null
+                  ? "NO ROBUST INTERVENTION AVAILABLE"
+                  : dashboard.agentStage ===
+                      "HUMAN_APPROVAL" &&
+                    dashboard.recommendation
+                    ? "WAITING HUMAN"
+                    : dashboard.verificationStatus ===
                       "VERIFIED"
                     ? "VERIFIED"
                     : agentState

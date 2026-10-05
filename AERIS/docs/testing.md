@@ -59,10 +59,10 @@ metrics
 integration
 ```
 
-At review time, the backend result is:
+Current verified result:
 
 ```text
-272 passed
+286 passed
 ```
 
 ---
@@ -90,10 +90,10 @@ hybrid investigation
 tool registry
 ```
 
-At review time:
+Current verified result:
 
 ```text
-121 passed, 5 skipped
+123 passed, 5 skipped
 ```
 
 ---
@@ -133,8 +133,8 @@ Finally, run both deterministic proof scripts:
 
 ```bash
 cd ..
-PYTHONPATH=backend python scripts/run_flagship.py
-PYTHONPATH=backend python scripts/run_agent_flagship.py
+python scripts/run_flagship.py
+python scripts/run_agent_flagship.py
 ```
 
 ---
@@ -193,8 +193,8 @@ When a tool, LLM, adapter, or verifier fails, the system should report that fact
 | Inspect invalid routes | ALT-C / ALT-E show rejection reasons |
 | Inspect critic | Critic evidence visible |
 | Approve ALT-D | Execute then verify |
-| Reject ALT-D | New recommendation, fresh approval state |
-| Reject again | Another reassessment instead of execution |
+| Reject ALT-D | Reassessment; fresh approval only if a robust option remains |
+| Reject again | Reassess again; fail closed if no robust option remains |
 | Refresh after reset | Clean baseline |
 | Gemini unavailable | Deterministic fallback, no fabricated success |
 
@@ -230,3 +230,15 @@ flagship deterministic runner
 ```
 
 A PR should not merge if the flagship candidate identity, approval semantics or verification boundary becomes nondeterministic.
+
+
+## 11. Frontend regression test
+
+The dashboard adapter has a dependency-free Node test for event-time rendering and degraded reassessment presentation:
+
+```bash
+cd frontend
+npm test
+```
+
+This test intentionally does not require Vite or React dependencies.

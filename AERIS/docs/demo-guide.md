@@ -15,7 +15,7 @@ The recommended demo length is approximately four to six minutes.
 Start the backend:
 
 ```bash
-PYTHONPATH=backend uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --reload
 ```
 
 Start the frontend:
@@ -131,7 +131,7 @@ This demonstrates that the model is not an autonomous controller.
 Click:
 
 ```text
-APPROVE & EXECUTE
+APPROVE SIMULATED INTERVENTION
 ```
 
 Show the transition:

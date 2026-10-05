@@ -174,7 +174,7 @@ class DecisionSynthesizer:
 
         leader = score_map.get(leader_id)
 
-        if leader is None or not leader.feasible:
+        if leader is None or not leader.feasible or not leader.recommendable:
             return None
 
         if (
@@ -188,6 +188,7 @@ class DecisionSynthesizer:
             if (
                 replacement is not None
                 and replacement.feasible
+                and replacement.recommendable
             ):
                 return replacement.candidate_id
 

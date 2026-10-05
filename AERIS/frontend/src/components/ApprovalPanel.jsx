@@ -286,7 +286,7 @@ export default function ApprovalPanel({
                 onApprove
               }
             >
-              APPROVE &amp; EXECUTE
+              APPROVE SIMULATED INTERVENTION
             </button>
 
 

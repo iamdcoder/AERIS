@@ -7,14 +7,13 @@ The `backend/` directory contains the FastAPI transport layer, domain models, de
 From the repository root:
 
 ```bash
-PYTHONPATH=backend uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --reload
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:PYTHONPATH="backend"
-uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --reload
 ```
 
 FastAPI docs:
@@ -63,4 +62,4 @@ From repository root:
 python -m pytest backend/tests -q
 ```
 
-The latest user-verified backend suite completed with 272 passed and one deprecation warning from the test client dependency stack.
+The current verified backend suite contains 286 passing tests.

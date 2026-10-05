@@ -209,3 +209,80 @@ def test_reassessment_is_deterministic():
     )
 
     assert first.model_dump() == second.model_dump()
+
+def test_reassessment_does_not_promote_hard_feasible_but_fragile_candidate():
+    reassessor = CandidateReassessor()
+
+    result = reassessor.reassess(
+        rejected_candidate_id="ALT-D",
+        rejection_reason="Dispatcher rejected the resilient option.",
+        candidates=[
+            {
+                "id": "ALT-D",
+                "feasible": True,
+                "target_delay_min": 4,
+                "local_score": 0.70,
+                "resilience": 0.80,
+            },
+            {
+                "id": "ALT-A",
+                "feasible": True,
+                "target_delay_min": 0,
+                "local_score": 1.00,
+                "network_delay_delta_min": 22,
+                "peak_sector_utilization": 1.30,
+                "stress_passed": 0,
+                "stress_total": 5,
+                "second_intervention_probability": 1.0,
+            },
+            {
+                "id": "ALT-B",
+                "feasible": True,
+                "target_delay_min": 7,
+                "local_score": 0.85,
+                "network_delay_delta_min": 10,
+                "peak_sector_utilization": 0.95,
+                "stress_passed": 3,
+                "stress_total": 5,
+                "second_intervention_probability": 0.4,
+            },
+        ],
+    )
+
+    assert result.new_recommended_candidate_id == "ALT-B"
+    assert result.decision_score_result is not None
+    by_id = {item.candidate_id: item for item in result.decision_score_result.scores}
+    assert by_id["ALT-A"].feasible is True
+    assert by_id["ALT-A"].recommendable is False
+    assert by_id["ALT-A"].recommendation_blockers
+
+
+def test_reassessment_reports_no_robust_intervention_when_all_remaining_options_are_fragile():
+    reassessor = CandidateReassessor()
+
+    result = reassessor.reassess(
+        rejected_candidate_id="ALT-D",
+        rejection_reason="Not acceptable.",
+        candidates=[
+            {
+                "id": "ALT-D",
+                "feasible": True,
+            },
+            {
+                "id": "ALT-A",
+                "feasible": True,
+                "network_delay_delta_min": 30,
+            },
+        ],
+        stress_tests=[
+            {
+                "candidate_id": "ALT-A",
+                "scenarios_passed": 0,
+                "scenarios_total": 5,
+            }
+        ],
+    )
+
+    assert result.new_recommended_candidate_id is None
+    assert result.requires_new_approval is False
+    assert "no recommendable" in result.summary.lower()

@@ -77,5 +77,5 @@ For core engine changes, also run:
 
 ```bash
 cd ..
-PYTHONPATH=backend python scripts/run_flagship.py
+python scripts/run_flagship.py
 ```

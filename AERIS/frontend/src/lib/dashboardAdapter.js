@@ -1,4 +1,4 @@
-import { DEMO_TIMELINE } from "./demoData";
+import { DEMO_TIMELINE } from "./demoData.js";
 
 
 function asNumber(
@@ -391,6 +391,15 @@ function normalizeCandidate(
 
     feasible:
       value.feasible === true,
+
+    recommendable:
+      value.recommendable !== false &&
+      value.recommendable !== 0,
+
+    recommendationBlockers:
+      Array.isArray(value.recommendation_blockers)
+        ? value.recommendation_blockers
+        : [],
 
     operatorRejected:
       false,
@@ -1223,153 +1232,158 @@ function timelineItem(
 }
 
 
+function eventSimulationTime(
+  events,
+  eventTypes,
+  fallback,
+) {
+  for (const event of [...asArray(events)].reverse()) {
+    if (!eventTypes.has(event?.event_type)) {
+      continue;
+    }
+
+    const value =
+      event?.data?.simulation_time_min ??
+      event?.simulation_time_min ??
+      null;
+    const numeric = asNumber(value);
+    if (numeric !== null) {
+      return numeric;
+    }
+  }
+
+  return asNumber(fallback, 0);
+}
+
+
+function formatSimulationTime(value) {
+  const numeric = Math.max(0, Math.round(asNumber(value, 0)));
+  return `T+${String(numeric).padStart(2, "0")}`;
+}
+
+
 function buildTimeline(
   agentState,
   simulationTimeMin,
   reassessmentInfo,
 ) {
-  const base =
-    DEMO_TIMELINE.map(
-      (item) => ({
-        ...item,
-      }),
-    );
+  const base = DEMO_TIMELINE.map((item) => ({ ...item }));
+  const events = asArray(agentState?.events);
 
-  const stage =
-    String(
-      agentState?.stage ||
-        "",
-    ).toUpperCase();
+  const recommendationTime = eventSimulationTime(
+    events,
+    new Set(["RECOMMENDATION_READY"]),
+    simulationTimeMin,
+  );
+  const approvalTime = eventSimulationTime(
+    events,
+    new Set(["APPROVAL_RESULT", "HUMAN_APPROVAL"]),
+    recommendationTime,
+  );
+  const reassessmentTime = eventSimulationTime(
+    events,
+    new Set(["REASSESSMENT_COMPLETE", "CANDIDATE_REJECTED", "NO_ROBUST_INTERVENTION"]),
+    simulationTimeMin,
+  );
+  const executionTime = eventSimulationTime(
+    events,
+    new Set(["EXECUTION_RESULT"]),
+    simulationTimeMin,
+  );
 
-  const stageIndex =
-    stageRank(
-      stage,
-    );
+  const verification = normalizeVerification(agentState, null);
+  const verifiedAt = verification.verifiedAtMin ?? eventSimulationTime(
+    events,
+    new Set(["VERIFICATION_RESULT"]),
+    simulationTimeMin,
+  );
 
-  if (
-    stageIndex >=
-    6
-  ) {
+  if (agentState?.recommendation) {
     base.push(
       timelineItem(
-        "T+19",
+        formatSimulationTime(recommendationTime),
         "AERIS recommends",
         "Candidate evidence converges on the resilient network-level intervention.",
       ),
     );
   }
 
-
-  if (
-    reassessmentInfo
-  ) {
-    const rejectedId =
-      reassessmentInfo.rejectedCandidateId ||
-      "previous candidate";
-
-    const reason =
-      reassessmentInfo.rejectionReason ||
-      "Operator rejected the previous recommendation.";
+  if (reassessmentInfo) {
+    const rejectedId = reassessmentInfo.rejectedCandidateId || "previous candidate";
+    const reason = reassessmentInfo.rejectionReason || "Operator rejected the previous recommendation.";
 
     base.push(
       timelineItem(
-        "T+19",
+        formatSimulationTime(reassessmentTime),
         "Human rejects",
         `${rejectedId} rejected: ${reason}`,
       ),
-    );
-
-    base.push(
       timelineItem(
-        "T+19",
+        formatSimulationTime(reassessmentTime),
         "AERIS reassesses",
-        "AERIS excludes the rejected intervention and re-ranks the remaining candidates.",
+        "AERIS excludes the rejected intervention and re-ranks the remaining candidates against the resilience policy.",
       ),
     );
 
-    if (
-      reassessmentInfo
-        .newRecommendedCandidateId
-    ) {
+    if (reassessmentInfo.newRecommendedCandidateId) {
       base.push(
         timelineItem(
-          "T+19",
+          formatSimulationTime(reassessmentTime),
           "New recommendation",
           `AERIS now recommends ${reassessmentInfo.newRecommendedCandidateId} and requires fresh human approval.`,
         ),
       );
+    } else {
+      base.push(
+        timelineItem(
+          formatSimulationTime(reassessmentTime),
+          "No robust intervention",
+          "No remaining candidate met the network-resilience recommendation policy.",
+        ),
+      );
     }
-  } else if (
-    agentState?.approval
-      ?.decision ===
-    "APPROVED"
-  ) {
+  } else if (agentState?.approval?.decision === "APPROVED") {
     base.push(
       timelineItem(
-        "T+19",
+        formatSimulationTime(approvalTime),
         "Human approves",
-        "The operator authorizes the selected intervention before execution.",
+        "The dispatcher authorizes the selected intervention before simulated execution.",
       ),
     );
   }
 
-
-  const verification =
-    normalizeVerification(
-      agentState,
-      null,
-    );
-
-
-  if (
-    !reassessmentInfo &&
-    verification.status ===
-      "VERIFIED"
-  ) {
-    const verifiedAt =
-      verification.verifiedAtMin ??
-      simulationTimeMin;
-
+  if (agentState?.approval?.decision === "APPROVED" &&
+      executionTime !== recommendationTime &&
+      executionTime !== simulationTimeMin) {
     base.push(
       timelineItem(
-        `T+${String(
-          verifiedAt,
-        ).padStart(
-          2,
-          "0",
-        )}`,
+        formatSimulationTime(executionTime),
+        "Simulated execution",
+        "The approved intervention was applied in the deterministic simulation.",
+      ),
+    );
+  }
+
+  if (agentState?.verification_result?.status === "VERIFIED") {
+    base.push(
+      timelineItem(
+        formatSimulationTime(verifiedAt),
         "Network verified",
         "Post-action constraints and network impact remain within the deterministic verification boundary.",
       ),
     );
   }
 
-
-  const seen =
-    new Set();
-
-  return base.filter(
-    (item) => {
-      const key =
-        `${item.time}|${item.title}|${item.description}`;
-
-      if (
-        seen.has(
-          key,
-        )
-      ) {
-        return false;
-      }
-
-      seen.add(
-        key,
-      );
-
-      return true;
-    },
-  );
+  const seen = new Set();
+  return base.filter((item) => {
+    const key = `${item.time}|${item.title}|${item.description}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
-
 
 function baseDashboard({
   worldState,
@@ -1581,15 +1595,18 @@ export function normalizeAgentState(
     );
 
 
-  const isReassessment =
-    Boolean(
-      reassessmentInfo,
-    ) &&
+  const stage =
     String(
       agentState?.stage ||
         "",
-    ).toUpperCase() ===
-      "HUMAN_APPROVAL";
+    ).toUpperCase();
+
+  const isReassessment =
+    Boolean(reassessmentInfo);
+
+  const reassessmentPending =
+    Boolean(reassessmentInfo) &&
+    stage === "HUMAN_APPROVAL";
 
 
   const rawCandidates =
@@ -1643,18 +1660,25 @@ export function normalizeAgentState(
     null;
 
 
+  const terminalNoForcedFallback =
+    stage === "DEGRADED" ||
+    stage === "FAILED";
+
   const recommendedCandidate =
     candidates.find(
       (candidate) =>
         candidate.id ===
           recommendedId &&
+        candidate.recommendable &&
         !candidate.operatorRejected,
     ) ||
-    candidates.find(
-      (candidate) =>
-        candidate.feasible &&
-        !candidate.operatorRejected,
-    ) ||
+    (!terminalNoForcedFallback &&
+      candidates.find(
+        (candidate) =>
+          candidate.feasible &&
+          candidate.recommendable &&
+          !candidate.operatorRejected,
+      )) ||
     null;
 
 
@@ -1672,7 +1696,7 @@ export function normalizeAgentState(
 
 
   const currentApprovalStatus =
-    isReassessment
+    reassessmentPending
       ? "PENDING"
       : historicalDecision;
 
@@ -1713,7 +1737,7 @@ export function normalizeAgentState(
 
       simulationTimeOverride:
         worldState?.time_min ??
-        19,
+        0,
     });
 
 
@@ -1841,19 +1865,23 @@ export function getRecommendedCandidate(
     dashboard?.recommendation
       ?.candidateId;
 
-
   return (
     dashboard?.candidates?.find(
       (candidate) =>
         candidate.id ===
           id &&
+        candidate.recommendable &&
         !candidate.operatorRejected,
     ) ||
     dashboard?.candidates?.find(
       (candidate) =>
         candidate.feasible &&
+        candidate.recommendable &&
         !candidate.operatorRejected,
     ) ||
     null
   );
 }
+
+
+export { buildTimeline };

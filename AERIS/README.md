@@ -139,17 +139,19 @@ Verification                VERIFIED
 The crucial comparison is:
 
 ```text
-ALT-A — local leader
-Local score                 0.92
+ALT-A — locally attractive, not recommendable
+Target delay                +0.03 min
 Network delta              +22.03 min
-Stress survival             0/5
-Resilience                  0.00
+Peak sector                 130%
+Stress survival              0/5
+Re-intervention probability 100%
 
-ALT-D — resilient winner
-Local score                 0.63
+ALT-D — network-resilient winner
+Target delay                +4.49 min
 Network delta              +12.49 min
-Stress survival             4/5
-Resilience                  0.80
+Peak sector                 100%
+Stress survival              4/5
+Re-intervention probability  20%
 ```
 
 This is the central AERIS story: **the final network-resilient choice is not the same as the locally strongest choice**.
@@ -456,21 +458,20 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 VITE_OPERATIONS_WS_URL=ws://127.0.0.1:8000/ws/operations
 ```
 
-The current application is REST-driven. The WebSocket address is retained as a planned/contracted interface; the uploaded source snapshot does not currently expose a backend WebSocket route.
+The backend exposes `WS /ws/operations` for the simulated operational feed. The frontend prefers WebSocket and automatically falls back to `GET /operations/live` polling. Production deployments can override the WebSocket URL with `VITE_OPERATIONS_WS_URL`.
 
 ### 5. Start the backend
 
 From the repository root:
 
 ```bash
-PYTHONPATH=backend uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --reload
 ```
 
 Windows PowerShell alternative:
 
 ```powershell
-$env:PYTHONPATH="backend"
-uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --reload
 ```
 
 The backend should be available at:
@@ -509,7 +510,7 @@ http://localhost:5173
 The repository includes an offline deterministic runner:
 
 ```bash
-PYTHONPATH=backend python scripts/run_flagship.py
+python scripts/run_flagship.py
 ```
 
 The runner uses `backend/app/engine/public.py`, resets the engine, progresses the synthetic scenario, evaluates candidates, stress-tests them, applies the recommendation after explicit approval in the scripted demonstration, verifies the result, and prints a machine-readable summary.
@@ -648,14 +649,14 @@ The UI is intentionally an evidence surface. It should explain what happened and
 At review time, the deterministic Python regression suites pass as follows:
 
 ```text
-Backend suite : 272 passed
-Copilot suite : 121 passed, 5 skipped
-Combined      : 393 passed, 5 skipped
+Backend suite : 286 passed
+Copilot suite : 123 passed, 5 skipped
+Combined      : 409 passed, 5 skipped
 Flagship CLI  : SUCCESS / ALT-D / VERIFIED
 Agent proof   : SUCCESS / ALT-D / VERIFIED
 ```
 
-The release artifact intentionally excludes `node_modules/` and `dist/`. The frontend uses the pinned versions recorded in `frontend/package-lock.json`; run `npm ci` before the production build. The last bundled source snapshot had a successful Vite build, but the build was not re-run after dependency cleanup in this review environment because the package installation timed out.
+The release artifact intentionally excludes `node_modules/` and `dist/`. The frontend uses the pinned versions recorded in `frontend/package-lock.json`. The source-level frontend regression tests pass in this environment, but the Vite production build is currently blocked because `npm ci` could not complete with the available registry/network access. Run `cd frontend && npm ci && npm run build` on a network-enabled machine before final submission.
 
 Run the suites from the repository root:
 

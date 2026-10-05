@@ -264,27 +264,34 @@ def test_rejection_creates_new_human_approval_cycle(
     body = response.json()
 
     assert body["stage"] == (
-        "HUMAN_APPROVAL"
+        "DEGRADED"
     )
 
     assert body["status"] == (
-        "WAITING_HUMAN"
+        "DEGRADED"
     )
 
     assert (
         body["approval"]["decision"]
-        == "PENDING"
+        == "REJECTED"
     )
 
     assert (
         body["recommendation"]
-        is not None
+        is None
     )
 
+    assert body["leading_candidate_id"] is None
+
+    no_robust = [
+        event
+        for event in body["events"]
+        if event["event_type"] == "NO_ROBUST_INTERVENTION"
+    ]
+    assert no_robust
     assert (
-        body["recommendation"]
-        ["candidate_id"]
-        != "ALT-D"
+        no_robust[-1]["data"]["status"]
+        == "NO_ROBUST_INTERVENTION_AVAILABLE"
     )
 
 

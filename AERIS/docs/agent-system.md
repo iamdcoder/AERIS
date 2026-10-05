@@ -283,7 +283,7 @@ AWAITING_APPROVAL
 The operator can either:
 
 ```text
-APPROVE & EXECUTE
+APPROVE SIMULATED INTERVENTION
 ```
 
 or:
@@ -300,7 +300,7 @@ AERIS does not treat model confidence as permission to execute.
 
 On rejection, the system records the human reason and removes the rejected candidate from the current recommendation pool.
 
-A new recommendation is produced and returns to a fresh human-approval state.
+The rejected candidate is permanently excluded from the current decision cycle. AERIS reruns deterministic ranking and critic review. A fresh human-approval state is returned only when a recommendable candidate remains. If all remaining candidates are hard-feasible but operationally fragile under the network-resilience policy, AERIS fails closed with `NO_ROBUST_INTERVENTION_AVAILABLE` rather than forcing a route.
 
 The frontend intentionally separates:
 
@@ -315,6 +315,28 @@ current approval state
 ```
 
 so an old `REJECTED`, `EXECUTED`, or `VERIFIED` status cannot leak into a new decision cycle.
+
+---
+
+## 14. Candidate status semantics
+
+AERIS keeps these states distinct:
+
+```text
+hard feasible
+    ↓
+recommendable
+    ↓
+recommended
+    ↓
+approved
+    ↓
+executed
+    ↓
+verified
+```
+
+A candidate may be hard-feasible but not recommendable because its deterministic network/stress evidence is too fragile. Human rejection records a `rejected` state; degraded post-decision conditions use `reassessment_required` rather than silently continuing an old approval cycle.
 
 ---
 

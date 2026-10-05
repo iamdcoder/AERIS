@@ -1805,9 +1805,33 @@ class AgentOrchestrator:
             .new_recommended_candidate_id
             is None
         ):
-            state.status = (
-                RunStatus.COMPLETED
+            state.recommendation = None
+            state.leading_candidate_id = None
+            state.events.append(
+                self._event(
+                    state,
+                    "NO_ROBUST_INTERVENTION",
+                    (
+                        "No remaining candidate meets the deterministic "
+                        "network-resilience recommendation policy. AERIS "
+                        "will not force an intervention after human rejection."
+                    ),
+                    data={
+                        "status": "NO_ROBUST_INTERVENTION_AVAILABLE",
+                        "next_action": "MONITOR_OR_ESCALATE",
+                    },
+                )
             )
+            state.status = RunStatus.DEGRADED
+            transition(
+                state,
+                AgentStage.DEGRADED,
+                (
+                    "Reassessment completed without a sufficiently robust "
+                    "intervention; no new approval request was created."
+                ),
+            )
+            self._sync_evidence(state)
             return state
 
         new_id = (
@@ -1826,24 +1850,63 @@ class AgentOrchestrator:
             )
         )
 
-        if new_candidate is not None:
-            # Preserve the new candidate as the visible recommendation.
-            state.recommendation = (
-                Recommendation(
-                    candidate_id=new_id,
-                    confidence=0.0,
-                    summary=(
-                        lifecycle.summary
-                    ),
-                    why_selected=[],
-                    rejected_candidates=[],
-                    critic=None,
-                    evidence_ids=(
-                        self.evidence.ids()
-                    ),
-                    human_approval_required=True,
+        if new_candidate is None:
+            raise RuntimeError(
+                f"Reassessment selected unknown candidate {new_id!r}."
+            )
+
+        # Re-run the deterministic critic against the new leader instead of
+        # carrying the previous challenge forward as decorative state.
+        self._score_result = lifecycle.reassessment.decision_score_result
+        self._ranking_summary = lifecycle.reassessment.ranking_summary
+        self._decision_critic_result = None
+        self._critic(state)
+
+        final = self.synthesizer.synthesize(
+            ranking=self._ranking_summary,
+            score_result=self._score_result,
+            critic_result=self._decision_critic_result,
+            target_flight_id=state.target_flight_id,
+        )
+
+        if final.candidate_id is None:
+            state.recommendation = None
+            state.leading_candidate_id = None
+            state.events.append(
+                self._event(
+                    state,
+                    "NO_ROBUST_INTERVENTION",
+                    final.explanation,
+                    data={
+                        "status": "NO_ROBUST_INTERVENTION_AVAILABLE",
+                        "next_action": "MONITOR_OR_ESCALATE",
+                    },
                 )
             )
+            state.status = RunStatus.DEGRADED
+            transition(
+                state,
+                AgentStage.DEGRADED,
+                "Critic review left no robust candidate for re-approval.",
+            )
+            self._sync_evidence(state)
+            return state
+
+        state.leading_candidate_id = final.candidate_id
+        state.recommendation = Recommendation(
+            candidate_id=final.candidate_id,
+            confidence=final.confidence,
+            summary=final.explanation,
+            why_selected=[item.statement for item in final.evidence[:6]],
+            rejected_candidates=[
+                candidate
+                for candidate in state.candidates
+                if candidate.get("feasible") is not True
+            ],
+            critic=state.critic_result,
+            evidence_ids=self.evidence.ids(),
+            human_approval_required=True,
+        )
 
         self.approval_controller.reset_for_reassessment()
 
@@ -2193,6 +2256,14 @@ class AgentOrchestrator:
         evidence_ids: list[str] | None = None,
         data: dict[str, Any] | None = None,
     ) -> AgentEvent:
+        event_data = dict(data or {})
+        simulation_time = state.world_state.get("time_min")
+        if simulation_time is not None:
+            try:
+                event_data.setdefault("simulation_time_min", float(simulation_time))
+            except (TypeError, ValueError):
+                pass
+
         return AgentEvent(
             sequence=(
                 state.step
@@ -2207,5 +2278,5 @@ class AgentOrchestrator:
             evidence_ids=(
                 evidence_ids or []
             ),
-            data=data or {},
+            data=event_data,
         )

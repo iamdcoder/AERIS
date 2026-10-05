@@ -7,7 +7,7 @@ network reversal, the deterministic critic, the human approval gate, execution,
 post-action verification, and the rejection/reassessment path.
 
 Usage from repository root:
-    PYTHONPATH=backend python scripts/run_agent_flagship.py
+    python scripts/run_agent_flagship.py
 """
 from __future__ import annotations
 
@@ -130,15 +130,34 @@ def main() -> int:
     )
     new_id = (reassessed.get("recommendation") or {}).get("candidate_id")
 
-    print(f"  Rejection path         : {rejected_id} → {new_id}")
+    print(f"  Rejection path         : {rejected_id} → {new_id or 'NO ROBUST INTERVENTION'}")
     print(f"  Reassessment stage     : {reassessed.get('stage')}")
 
-    _assert(reassessed.get("stage") == "HUMAN_APPROVAL", "Reassessment did not return to human approval.")
-    _assert(reassessed.get("status") == "WAITING_HUMAN", "Reassessment did not remain blocked for human review.")
-    _assert(new_id and new_id != rejected_id, "Reassessment did not produce a new recommendation.")
+    # The flagship scenario intentionally has no second robust intervention
+    # after ALT-D is rejected: ALT-A and ALT-B fail the network-resilience
+    # recommendation policy. AERIS must fail closed rather than force a bad
+    # route back into the human approval queue.
+    _assert(
+        reassessed.get("stage") == "DEGRADED",
+        "Reassessment did not fail closed when no robust intervention remained.",
+    )
+    _assert(
+        reassessed.get("status") == "DEGRADED",
+        "Reassessment did not expose the degraded terminal state.",
+    )
+    _assert(
+        new_id is None,
+        "Reassessment forced a fragile fallback candidate.",
+    )
+    no_robust_events = [
+        event
+        for event in reassessed.get("events", [])
+        if event.get("event_type") == "NO_ROBUST_INTERVENTION"
+    ]
+    _assert(no_robust_events, "No robust-intervention state was recorded.")
 
     print("\n  AGENTIC FLAGSHIP RESULT: SUCCESS")
-    print("  Agent loop, critic, approval, verification and rejection path all passed.")
+    print("  Agent loop, critic, approval, verification and fail-closed rejection path all passed.")
     print("========================================================\n")
     return 0
 
