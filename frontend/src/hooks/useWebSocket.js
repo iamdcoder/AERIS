@@ -212,9 +212,18 @@ export function useWebSocket({
 
   useEffect(() => {
     stoppedRef.current = false;
-    connect();
+
+    // Defer the initial socket creation by one turn so React 18/19
+    // StrictMode can clean up its first effect pass without creating and
+    // immediately aborting a real WebSocket connection. This avoids the
+    // noisy 'closed before the connection is established' browser error
+    // during development while preserving the live WebSocket transport.
+    const initialConnectTimer = window.setTimeout(() => {
+      connect();
+    }, 0);
 
     return () => {
+      window.clearTimeout(initialConnectTimer);
       stoppedRef.current = true;
       clearTimers();
       closeSocket();

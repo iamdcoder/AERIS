@@ -440,6 +440,13 @@ function App() {
     false,
   );
 
+  const [
+    decisionSubmitting,
+    setDecisionSubmitting,
+  ] = useState(
+    null,
+  );
+
   const decisionActionRef = useRef(null);
 
 
@@ -793,22 +800,56 @@ function App() {
 
     await runAerisAtTime(liveTime);
   }
+  function applyDecisionAgentState(state, expectedDecision = null) {
+    const normalized = normalizeAgentState(state);
+    const rawDecision = String(
+      state?.approval?.decision ||
+        expectedDecision ||
+        normalized.approvalStatus ||
+        "PENDING",
+    ).toUpperCase();
+
+    const authoritativeDashboard = {
+      ...normalized,
+      approvalStatus: rawDecision,
+    };
+
+    setAgentState(state);
+    setDashboard(authoritativeDashboard);
+
+    const nextCandidateId =
+      authoritativeDashboard.recommendation?.candidateId ||
+      selectedCandidateId ||
+      null;
+
+    setSelectedCandidateId(nextCandidateId);
+
+    return authoritativeDashboard;
+  }
+
   async function handleApprove() {
     if (
       !agentState ||
       busy ||
+      decisionSubmitting ||
       decisionActionRef.current
     ) {
       return;
     }
 
+    const runId = agentState.run_id;
+    if (!runId) {
+      setError("AERIS cannot approve a run without a valid run ID. Run AERIS again.");
+      return;
+    }
+
     decisionActionRef.current = "APPROVE";
-    setBusy(true);
+    setDecisionSubmitting("APPROVE");
     setError("");
 
     try {
       const result = await approveCopilotRun({
-        run_id: agentState.run_id,
+        run_id: runId,
         decided_by: "demo_dispatcher",
       });
 
@@ -826,23 +867,14 @@ function App() {
         return;
       }
 
-      setAgentState(result.data);
-
-      const normalized = normalizeAgentState(result.data);
-      setDashboard(normalized);
-      setSelectedCandidateId(
-        normalized.recommendation?.candidateId || selectedCandidateId,
-      );
+      applyDecisionAgentState(result.data, "APPROVED");
     } finally {
       decisionActionRef.current = null;
-      setBusy(false);
+      setDecisionSubmitting(null);
     }
   }
 
-
-  async function handleReject(
-    rejectionReason,
-  ) {
+  async function handleReject(rejectionReason) {
     const cleanReason = String(rejectionReason || "").trim();
 
     if (!cleanReason) {
@@ -853,18 +885,25 @@ function App() {
     if (
       !agentState ||
       busy ||
+      decisionSubmitting ||
       decisionActionRef.current
     ) {
       return;
     }
 
+    const runId = agentState.run_id;
+    if (!runId) {
+      setError("AERIS cannot reject a run without a valid run ID. Run AERIS again.");
+      return;
+    }
+
     decisionActionRef.current = "REJECT";
-    setBusy(true);
+    setDecisionSubmitting("REJECT");
     setError("");
 
     try {
       const result = await rejectCopilotRun({
-        run_id: agentState.run_id,
+        run_id: runId,
         reason: cleanReason,
         decided_by: "demo_dispatcher",
       });
@@ -883,16 +922,10 @@ function App() {
         return;
       }
 
-      setAgentState(result.data);
-
-      const normalized = normalizeAgentState(result.data);
-      setDashboard(normalized);
-      setSelectedCandidateId(
-        normalized.recommendation?.candidateId || null,
-      );
+      applyDecisionAgentState(result.data, "REJECTED");
     } finally {
       decisionActionRef.current = null;
-      setBusy(false);
+      setDecisionSubmitting(null);
     }
   }
 
@@ -1352,7 +1385,11 @@ function App() {
               }
               disabled={
                 !waitingForApproval ||
-                busy
+                busy ||
+                Boolean(decisionSubmitting)
+              }
+              submitting={
+                decisionSubmitting
               }
             />
 

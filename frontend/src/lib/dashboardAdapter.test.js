@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTimeline } from "./dashboardAdapter.js";
+import { buildTimeline, normalizeAgentState } from "./dashboardAdapter.js";
 
 test("timeline uses event simulation time instead of a hard-coded recommendation time", () => {
   const state = {
@@ -67,4 +67,56 @@ test("degraded reassessment timeline records rejection without inventing a fallb
     timeline.filter((item) => item.title === "No robust intervention").at(-1)?.time,
     "T+33",
   );
+});
+
+test("verified agent state normalizes remaining fuel without throwing during approval completion", () => {
+  const state = {
+    run_id: "run-1",
+    target_flight_id: "F102",
+    stage: "COMPLETED",
+    approval: { decision: "APPROVED" },
+    world_state: {
+      time_min: 20,
+      aircraft: [
+        {
+          id: "F102",
+          origin: "BOM",
+          destination: "DEL",
+          lat: 19,
+          lon: 73,
+        },
+      ],
+      sectors: [],
+      weather: [],
+      restrictions: [],
+      airports: [
+        {
+          id: "BOM",
+          operational_status: "NORMAL",
+          arrival_capacity: 10,
+          normal_arrival_capacity: 10,
+        },
+      ],
+      network_metrics: {},
+    },
+    candidates: [],
+    verification_result: {
+      status: "VERIFIED",
+      after_metrics: {
+        target_delay_delta_min: 1,
+        network_delay_delta_min: 2,
+        new_conflicts: 0,
+        fuel_margin_kg: 100,
+        fuel_reserve_margin_min: 30,
+        remaining_fuel_min: 120,
+        peak_sector_utilization_pct: 80,
+      },
+    },
+  };
+
+  const dashboard = normalizeAgentState(state);
+
+  assert.equal(dashboard.verification.status, "VERIFIED");
+  assert.equal(dashboard.verification.remainingFuelMin, 120);
+  assert.equal(dashboard.approvalStatus, "APPROVED");
 });

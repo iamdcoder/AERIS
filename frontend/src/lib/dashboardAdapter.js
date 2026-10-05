@@ -914,6 +914,9 @@ function normalizeVerification(
         value.remaining_fuel_min,
     );
 
+  const remainingFuelMin =
+    remainingFuel;
+
   const peak =
     asPercentRatio(
       after.max_sector_utilization_pct ??

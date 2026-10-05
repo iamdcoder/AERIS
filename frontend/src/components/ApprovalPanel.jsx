@@ -9,6 +9,7 @@ export default function ApprovalPanel({
   onApprove,
   onReject,
   disabled,
+  submitting = null,
 }) {
   const [
     reason,
@@ -286,7 +287,9 @@ export default function ApprovalPanel({
                 onApprove
               }
             >
-              APPROVE SIMULATED INTERVENTION
+              {submitting === "APPROVE"
+                ? "APPROVING…"
+                : "APPROVE SIMULATED INTERVENTION"}
             </button>
 
 
@@ -300,9 +303,20 @@ export default function ApprovalPanel({
                 submitReject
               }
             >
-              REJECT
+              {submitting === "REJECT"
+                ? "REJECTING…"
+                : "REJECT"}
             </button>
           </div>
+
+
+          {submitting && (
+            <div className="approval-warning">
+              {submitting === "APPROVE"
+                ? "Recording dispatcher approval and advancing deterministic execution…"
+                : "Recording dispatcher rejection and reassessing the remaining interventions…"}
+            </div>
+          )}
 
 
           <textarea
