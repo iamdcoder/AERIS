@@ -217,6 +217,6 @@ Examples:
 
 ## 7. Current transport status
 
-The API contract contains a planned `/ws/airspace` interface, but the current uploaded source does not expose a backend WebSocket route and the frontend WebSocket hook is a placeholder. The current command-center workflow is therefore REST-based.
+The current API exposes `/ws/operations` for the simulated operational feed. The frontend prefers WebSocket transport and falls back to `/operations/live` polling. The feed is an isolated deterministic replay used for the hackathon; it is not a production AAI/airline/ATC data connection.
 
 This is documented explicitly rather than pretending that real-time streaming is currently implemented.

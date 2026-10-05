@@ -59,10 +59,10 @@ metrics
 integration
 ```
 
-At documentation freeze, the user-verified result was:
+At review time, the backend result is:
 
 ```text
-272 passed, 1 warning
+272 passed
 ```
 
 ---
@@ -90,10 +90,10 @@ hybrid investigation
 tool registry
 ```
 
-At documentation freeze:
+At review time:
 
 ```text
-126 passed
+121 passed, 5 skipped
 ```
 
 ---
@@ -109,7 +109,7 @@ cd frontend
 npm run build
 ```
 
-The latest user-verified build completed successfully.
+The release artifact intentionally excludes `node_modules/` and `dist/`. The package manifest and lockfile are pinned; run `npm ci` followed by `npm run build` from `frontend/`. A fresh build was not re-run in this review environment because dependency installation timed out.
 
 ---
 
@@ -129,11 +129,12 @@ cd frontend
 npm run build
 ```
 
-Finally, run:
+Finally, run both deterministic proof scripts:
 
 ```bash
 cd ..
 PYTHONPATH=backend python scripts/run_flagship.py
+PYTHONPATH=backend python scripts/run_agent_flagship.py
 ```
 
 ---

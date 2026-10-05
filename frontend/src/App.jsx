@@ -15,6 +15,8 @@ import ApprovalPanel from "./components/ApprovalPanel";
 import VerificationPanel from "./components/VerificationPanel";
 import FlightDetail from "./components/FlightDetail";
 import Timeline from "./components/Timeline";
+import LiveOperationsPanel from "./components/LiveOperationsPanel";
+import { useWebSocket } from "./hooks/useWebSocket";
 
 import {
   approveCopilotRun,
@@ -22,7 +24,10 @@ import {
   healthCheck,
   rejectCopilotRun,
   resetCopilot,
+  resetLiveReplay,
   runCopilotRecommendation,
+  startLiveReplay,
+  stopLiveReplay,
 } from "./lib/api";
 
 import {
@@ -37,6 +42,9 @@ const FLAGSHIP_SCENARIO_ID =
 
 const FLAGSHIP_DECISION_TIME_MIN =
   19;
+
+const LIVE_REPLAY_END_MIN =
+  35;
 
 const TARGET_FLIGHT_ID =
   "F102";
@@ -73,13 +81,24 @@ function Header({
   phase,
   onRun,
   disabled,
-  backendConnected,
-  hasAgentState,
+  backendStatus,
 }) {
-  const running = phase === "RUNNING";
-  const completed = phase === "COMPLETE";
-  const failed = phase === "FAILED";
-  const waiting = phase === "WAITING_APPROVAL";
+  const running =
+    phase ===
+    "RUNNING";
+
+  const completed =
+    phase ===
+    "COMPLETE";
+
+  const failed =
+    phase ===
+    "FAILED";
+
+  const waiting =
+    phase ===
+    "WAITING_APPROVAL";
+
 
   return (
     <header className="topbar">
@@ -121,70 +140,26 @@ function Header({
 
       <div className="header-actions">
         <div
-          className={`backend-status ${
-            backendConnected === true
-              ? "connected"
-              : backendConnected === false
-                ? "offline"
-                : "checking"
+          className={`system-state ${
+            backendStatus === "OFFLINE"
+              ? "offline"
+              : backendStatus === "CHECKING"
+                ? "checking"
+                : ""
           }`}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            fontSize: "11px",
-            fontWeight: "600",
-            letterSpacing: "0.05em",
-            padding: "4px 8px",
-            borderRadius: "4px",
-            backgroundColor:
-              backendConnected === true
-                ? "rgba(16, 185, 129, 0.12)"
-                : backendConnected === false
-                  ? "rgba(239, 68, 68, 0.12)"
-                  : "rgba(245, 158, 11, 0.12)",
-            color:
-              backendConnected === true
-                ? "#10b981"
-                : backendConnected === false
-                  ? "#ef4444"
-                  : "#f59e0b",
-            border: `1px solid ${
-              backendConnected === true
-                ? "rgba(16, 185, 129, 0.3)"
-                : backendConnected === false
-                  ? "rgba(239, 68, 68, 0.3)"
-                  : "rgba(245, 158, 11, 0.3)"
-            }`,
-          }}
         >
-          <span
-            style={{
-              width: "6px",
-              height: "6px",
-              borderRadius: "50%",
-              backgroundColor: "currentColor",
-            }}
-          />
-          {backendConnected === true
-            ? "BACKEND CONNECTED"
-            : backendConnected === false
-              ? "BACKEND OFFLINE"
-              : "CHECKING BACKEND..."}
-        </div>
-
-        <div className="system-state">
           <span />
 
           {running
             ? "ORCHESTRATING"
-            : waiting
-              ? "WAITING HUMAN"
-              : completed
-                ? "VERIFIED"
-                : failed
-                  ? "FAILED"
-                  : "SIMULATION READY"}
+            : backendStatus === "OFFLINE"
+              ? "BACKEND OFFLINE"
+              : backendStatus === "CHECKING"
+                ? "CHECKING BACKEND"
+                : phase ===
+                    "WAITING_APPROVAL"
+                  ? "WAITING HUMAN"
+                  : mode}
         </div>
 
 
@@ -192,7 +167,8 @@ function Header({
           type="button"
           className="run-button"
           disabled={
-            disabled
+            disabled ||
+            waiting
           }
           onClick={
             onRun
@@ -200,9 +176,13 @@ function Header({
         >
           {running
             ? "AERIS RUNNING..."
-            : (hasAgentState || waiting || completed || failed)
-              ? "RERUN AERIS"
-              : "RUN AERIS"}
+            : waiting
+              ? "APPROVAL PENDING"
+              : completed
+                ? "RERUN AERIS"
+                : failed
+                  ? "RETRY AERIS"
+                  : "RUN AERIS"}
         </button>
       </div>
     </header>
@@ -400,70 +380,186 @@ function ErrorBanner({
     return null;
   }
 
-  const lines = String(message).split("\n").filter(Boolean);
 
   return (
     <section className="error-banner">
       <div>
         <strong>
-          AERIS ERROR
+          AERIS BACKEND ERROR
         </strong>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-          {lines.map((line, i) => (
-            <span key={i} style={{ display: "block", opacity: i === 0 ? 1 : 0.8 }}>
-              {line}
-            </span>
-          ))}
-        </div>
+        <span>
+          {message}
+        </span>
       </div>
 
 
-      {onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-        >
-          RETRY
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={
+          onRetry
+        }
+      >
+        RETRY
+      </button>
     </section>
   );
 }
 
 
 function App() {
-  const [dashboard, setDashboard] = useState(null);
-  const [agentState, setAgentState] = useState(null);
-  const [selectedCandidateId, setSelectedCandidateId] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [backendConnected, setBackendConnected] = useState(null); // null = checking
+  const [
+    dashboard,
+    setDashboard,
+  ] = useState(
+    null,
+  );
 
 
-  // Health check on mount and periodically
-  useEffect(() => {
-    let cancelled = false;
+  const [
+    agentState,
+    setAgentState,
+  ] = useState(
+    null,
+  );
 
-    async function checkHealth() {
-      const res = await healthCheck();
-      if (!cancelled) {
-        setBackendConnected(res.ok);
-      }
-    }
 
-    checkHealth();
-    const interval = window.setInterval(checkHealth, 30000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
+  const [
+    selectedCandidateId,
+    setSelectedCandidateId,
+  ] = useState(
+    null,
+  );
+
+
+  const [
+    busy,
+    setBusy,
+  ] = useState(
+    false,
+  );
+
+
+  const [
+    error,
+    setError,
+  ] = useState(
+    "",
+  );
+
+
+  const [
+    liveBusy,
+    setLiveBusy,
+  ] = useState(
+    false,
+  );
+
+
+  const [
+    backendStatus,
+    setBackendStatus,
+  ] = useState(
+    "CHECKING",
+  );
+
+
+  const {
+    snapshot: liveSnapshot,
+    connected: liveConnected,
+    transport: liveTransport,
+    reconnect: reconnectLive,
+  } = useWebSocket();
 
 
   useEffect(() => {
     loadBaseline();
   }, []);
+
+
+  useEffect(() => {
+    let disposed = false;
+
+    async function checkBackend() {
+      const result = await healthCheck();
+
+      if (disposed) {
+        return;
+      }
+
+      setBackendStatus(
+        result.ok
+          ? "CONNECTED"
+          : "OFFLINE",
+      );
+    }
+
+    checkBackend();
+
+    const timer = window.setInterval(
+      checkBackend,
+      30000,
+    );
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+
+  useEffect(() => {
+    if (
+      agentState ||
+      !liveSnapshot?.entities?.airspace?.CURRENT
+    ) {
+      return;
+    }
+
+    const airspace =
+      liveSnapshot.entities.airspace.CURRENT;
+
+    const network =
+      {
+        total_flights:
+          Array.isArray(airspace.aircraft)
+            ? airspace.aircraft.length
+            : undefined,
+        airborne_flights:
+          Array.isArray(airspace.aircraft)
+            ? airspace.aircraft.filter(
+                (flight) =>
+                  flight.status === "AIRBORNE",
+              ).length
+            : undefined,
+        holding_flights:
+          Array.isArray(airspace.aircraft)
+            ? airspace.aircraft.filter(
+                (flight) =>
+                  flight.status === "HOLDING",
+              ).length
+            : undefined,
+      };
+
+    const normalized =
+      normalizeBaseline({
+        airspace,
+        disruptions: {
+          weather_cells:
+            airspace.weather_cells || [],
+          restrictions:
+            airspace.restrictions || [],
+        },
+        network,
+        flight:
+          (airspace.aircraft || []).find(
+            (flight) =>
+              flight.id === TARGET_FLIGHT_ID,
+          ),
+      });
+
+    setDashboard(normalized);
+  }, [agentState, liveSnapshot]);
 
 
   async function loadBaseline() {
@@ -508,15 +604,197 @@ function App() {
   }
 
 
-  async function runAeris() {
-    if (busy) {
+  async function handleLiveStart() {
+    if (liveBusy || busy) {
       return;
     }
 
-    if (backendConnected === false) {
+    setLiveBusy(true);
+    setError("");
+    setAgentState(null);
+    setSelectedCandidateId(null);
+
+    const result = await startLiveReplay({
+      stopAtMinute: LIVE_REPLAY_END_MIN,
+      resetFirst: true,
+    });
+
+    setLiveBusy(false);
+
+    if (!result.ok) {
       setError(
-        "Backend unavailable.\nEnsure the AERIS backend is running on 127.0.0.1:8000.\nStart backend with: python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000"
+        result.error ||
+          "Unable to start the live operational replay.",
       );
+      return;
+    }
+
+    reconnectLive();
+
+    if (result.data) {
+      const airspace =
+        result.data.entities?.airspace?.CURRENT;
+
+      if (airspace) {
+        setDashboard(
+          normalizeBaseline({
+            airspace,
+            disruptions: {
+              weather_cells:
+                airspace.weather_cells || [],
+              restrictions:
+                airspace.restrictions || [],
+            },
+            flight:
+              (airspace.aircraft || []).find(
+                (flight) =>
+                  flight.id === TARGET_FLIGHT_ID,
+              ),
+          }),
+        );
+      }
+    }
+  }
+
+
+  async function handleLiveStop() {
+    if (liveBusy) {
+      return;
+    }
+
+    setLiveBusy(true);
+    const result = await stopLiveReplay();
+    setLiveBusy(false);
+
+    if (!result.ok) {
+      setError(
+        result.error ||
+          "Unable to stop the live operational replay.",
+      );
+    }
+  }
+
+
+  async function handleLiveReset() {
+    if (liveBusy || busy) {
+      return;
+    }
+
+    setLiveBusy(true);
+    setError("");
+    setAgentState(null);
+    setSelectedCandidateId(null);
+
+    const result = await resetLiveReplay();
+    setLiveBusy(false);
+
+    if (!result.ok) {
+      setError(
+        result.error ||
+          "Unable to reset the live operational replay.",
+      );
+      return;
+    }
+
+    const airspace =
+      result.data?.entities?.airspace?.CURRENT;
+
+    if (airspace) {
+      setDashboard(
+        normalizeBaseline({
+          airspace,
+          disruptions: {
+            weather_cells:
+              airspace.weather_cells || [],
+            restrictions:
+              airspace.restrictions || [],
+          },
+          flight:
+            (airspace.aircraft || []).find(
+              (flight) =>
+                flight.id === TARGET_FLIGHT_ID,
+            ),
+        }),
+      );
+    }
+
+    reconnectLive();
+  }
+
+
+  async function runAerisAtTime(decisionTimeMin) {
+    if (busy || liveBusy) {
+      return;
+    }
+
+    const decisionTime = Number(decisionTimeMin);
+    if (!Number.isInteger(decisionTime) || decisionTime < 0 || decisionTime > 35) {
+      setError("Invalid AERIS decision time.");
+      return;
+    }
+
+    if (liveSnapshot?.running) {
+      const stopResult = await stopLiveReplay();
+      if (!stopResult.ok) {
+        setError(stopResult.error || "Unable to pause the live operational feed.");
+        return;
+      }
+    }
+
+    setBusy(true);
+    setError("");
+    setAgentState(null);
+    setSelectedCandidateId(null);
+
+    try {
+      const reset = await resetCopilot();
+      if (!reset.ok) {
+        setError(reset.error || "Unable to reset the AERIS decision engine.");
+        return;
+      }
+
+      const runId = `WEB-${Date.now()}-${decisionTime}`;
+      const result = await runCopilotRecommendation({
+        target_flight_id: TARGET_FLIGHT_ID,
+        scenario_id: FLAGSHIP_SCENARIO_ID,
+        decision_time_min: decisionTime,
+        run_id: runId,
+      });
+
+      if (!result.ok) {
+        setError(result.error || "AERIS recommendation failed.");
+        return;
+      }
+
+      const state = result.data;
+      setAgentState(state);
+
+      const normalized = normalizeAgentState(state);
+      setDashboard(normalized);
+      setSelectedCandidateId(normalized.recommendation?.candidateId || null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAeris() {
+    await runAerisAtTime(FLAGSHIP_DECISION_TIME_MIN);
+  }
+
+  async function handleLiveReassess() {
+    const liveTime = Number(liveSnapshot?.last_simulation_time_min);
+    if (!Number.isInteger(liveTime) || liveTime <= FLAGSHIP_DECISION_TIME_MIN) {
+      setError("Advance the live operational feed beyond T+19 before reassessing.");
+      return;
+    }
+
+    await runAerisAtTime(liveTime);
+  }
+  async function handleApprove() {
+    if (
+      !agentState ||
+      busy
+    ) {
       return;
     }
 
@@ -528,54 +806,14 @@ function App() {
     setError("");
 
 
-    setAgentState(
-      null,
-    );
-
-
-    setSelectedCandidateId(
-      null,
-    );
-
-
-    const reset =
-      await resetCopilot();
-
-
-    if (!reset.ok) {
-      setBusy(
-        false,
-      );
-
-
-      setError(
-        reset.error ||
-          "Unable to reset the AERIS simulation.",
-      );
-
-
-      return;
-    }
-
-
-    const runId =
-      `WEB-${Date.now()}`;
-
-
     const result =
-      await runCopilotRecommendation(
+      await approveCopilotRun(
         {
-          target_flight_id:
-            TARGET_FLIGHT_ID,
-
-          scenario_id:
-            FLAGSHIP_SCENARIO_ID,
-
-          decision_time_min:
-            FLAGSHIP_DECISION_TIME_MIN,
-
           run_id:
-            runId,
+            agentState.run_id,
+
+          decided_by:
+            "demo_dispatcher",
         },
       );
 
@@ -586,82 +824,20 @@ function App() {
 
 
     if (!result.ok) {
-      setError(
-        result.error ||
-          "AERIS recommendation failed.",
-      );
-
-
-      return;
-    }
-
-
-    const state =
-      result.data;
-
-
-    setAgentState(
-      state,
-    );
-
-
-    const normalized =
-      normalizeAgentState(
-        state,
-      );
-
-
-    setDashboard(
-      normalized,
-    );
-
-
-    setSelectedCandidateId(
-      normalized
-        .recommendation
-        ?.candidateId ||
-        null,
-    );
-  }
-
-
-  async function handleApprove() {
-    if (
-      !agentState ||
-      busy
-    ) {
-      return;
-    }
-
-
-    if (!agentState?.run_id) {
-      setError("Cannot approve: no active AERIS run_id. Start a new AERIS run first.");
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-
-
-    const result = await approveCopilotRun({
-      run_id: agentState.run_id,
-      decided_by: "demo_dispatcher",
-    });
-
-    setBusy(false);
-
-
-    if (!result.ok) {
-      if (result.errorType === "RUN_NOT_FOUND") {
-        // Stale run — clear agent state and tell user
+      if (result.errorType === "NOT_FOUND") {
         setAgentState(null);
+        setSelectedCandidateId(null);
+        await loadBaseline();
         setError(
-          result.error ||
-          "The AERIS run is no longer active. Start a new AERIS run."
+          "This AERIS run is stale because the backend no longer has it. Run AERIS again.",
         );
       } else {
-        setError(result.error || "Approval failed.");
+        setError(
+          result.error ||
+            "Approval failed.",
+        );
       }
+
       return;
     }
 
@@ -721,35 +897,48 @@ function App() {
     }
 
 
-    if (!agentState?.run_id) {
-      setError("Cannot reject: no active AERIS run_id. Start a new AERIS run first.");
-      return;
-    }
+    setBusy(
+      true,
+    );
 
-    setBusy(true);
     setError("");
 
 
-    const result = await rejectCopilotRun({
-      run_id: agentState.run_id,
-      reason: cleanReason,
-      decided_by: "demo_dispatcher",
-    });
+    const result =
+      await rejectCopilotRun(
+        {
+          run_id:
+            agentState.run_id,
 
-    setBusy(false);
+          reason:
+            cleanReason,
+
+          decided_by:
+            "demo_dispatcher",
+        },
+      );
+
+
+    setBusy(
+      false,
+    );
 
 
     if (!result.ok) {
-      if (result.errorType === "RUN_NOT_FOUND") {
-        // Stale run — clear agent state and tell user
+      if (result.errorType === "NOT_FOUND") {
         setAgentState(null);
+        setSelectedCandidateId(null);
+        await loadBaseline();
         setError(
-          result.error ||
-          "The AERIS run is no longer active. Start a new AERIS run."
+          "This AERIS run is stale because the backend no longer has it. Run AERIS again.",
         );
       } else {
-        setError(result.error || "Recommendation rejection failed.");
+        setError(
+          result.error ||
+            "Recommendation rejection failed.",
+        );
       }
+
       return;
     }
 
@@ -893,12 +1082,22 @@ function App() {
   return (
     <div className="app-shell">
       <Header
-        mode={dashboard.mode}
-        phase={phase}
-        onRun={runAeris}
-        disabled={busy}
-        backendConnected={backendConnected}
-        hasAgentState={Boolean(agentState)}
+        mode={
+          dashboard.mode
+        }
+        phase={
+          phase
+        }
+        onRun={
+          runAeris
+        }
+        disabled={
+          busy ||
+          liveBusy
+        }
+        backendStatus={
+          backendStatus
+        }
       />
 
 
@@ -1026,6 +1225,39 @@ function App() {
           }
           rejectedCandidateId={
             dashboard.rejectedCandidateId
+          }
+        />
+
+
+        <LiveOperationsPanel
+          snapshot={
+            liveSnapshot
+          }
+          connected={
+            liveConnected
+          }
+          transport={
+            liveTransport
+          }
+          onStart={
+            handleLiveStart
+          }
+          onStop={
+            handleLiveStop
+          }
+          onReset={
+            handleLiveReset
+          }
+          onReassess={
+            handleLiveReassess
+          }
+          canReassess={
+            Number(liveSnapshot?.last_simulation_time_min ?? 0) >
+            FLAGSHIP_DECISION_TIME_MIN
+          }
+          busy={
+            liveBusy ||
+            busy
           }
         />
 

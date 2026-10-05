@@ -1,25 +1,16 @@
-import sys
-from pathlib import Path
-
-_this_dir = Path(__file__).resolve().parent
-_backend_dir = _this_dir.parents[1]
-_repo_root = _backend_dir.parent
-
-if str(_backend_dir) not in sys.path:
-    sys.path.insert(0, str(_backend_dir))
-if str(_repo_root) not in sys.path:
-    sys.path.insert(0, str(_repo_root))
+"""AERIS FastAPI application factory."""
+from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import health, airspace, decisions, copilot
+from .routes import health, airspace, decisions, copilot, operations
 
 
 def create_app() -> FastAPI:
     """Create and configure the AERIS FastAPI application."""
     app = FastAPI(
-        title="AERIS — Airspace Emergency Response Intelligence System",
+        title="AERIS — Agentic Airspace Resilience Intelligence System",
         description=(
             "Deterministic airspace intelligence API. "
             "The engine is authoritative; the API is an orchestration/transport layer. "
@@ -48,6 +39,9 @@ def create_app() -> FastAPI:
 
     # Copilot / AI orchestration endpoints
     app.include_router(copilot.router, tags=["copilot"])
+
+    # Live operational replay / normalized event stream.
+    app.include_router(operations.router, tags=["operations"])
 
     return app
 

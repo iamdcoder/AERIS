@@ -9,15 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@deck.gl/core": "latest",
-    "@deck.gl/layers": "latest",
-    "@deck.gl/react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "recharts": "latest"
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "recharts": "3.10.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest"
+    "@vitejs/plugin-react": "6.1.1",
+    "vite": "8.3.2"
   }
 }

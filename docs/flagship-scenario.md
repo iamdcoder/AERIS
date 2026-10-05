@@ -29,7 +29,7 @@ The scenario is synthetic. It is designed specifically to make network consequen
 | T+19 | Hard validation | ALT-C and ALT-E rejected |
 | T+21 | Frozen decision simulation | ALT-A, ALT-B and ALT-D compared |
 | T+24 | Stress test | Five future perturbations evaluated |
-| T+26 | Critic | Preliminary leader challenged |
+| T+26 | Decision/agent challenge | Local leader challenged by critic |
 | T+28 | Recommendation | ALT-D selected |
 | T+30 | Human approval | Operator approves ALT-D |
 | T+32 | Verification | Deterministic engine verifies the result |
@@ -152,7 +152,7 @@ The flagship engine output identifies F4 as the failed ALT-D stress case, where 
 
 ## 9. Critic challenge
 
-The critic evaluates the preliminary candidate against future fragility signals such as:
+The actual copilot path evaluates the **preliminary/local leader ALT-A** against future fragility signals such as:
 
 ```text
 FUTURE_ROBUSTNESS
@@ -162,9 +162,7 @@ CONFLICT_RISK
 DOWNSTREAM_IMPACT
 ```
 
-In the flagship story, ALT-A is the local leader but is challenged because it fails future robustness and has a high estimated probability of requiring another intervention.
-
-ALT-D survives the critic as the stronger resilient alternative.
+In the actual agent proof, ALT-A is the local leader but is challenged because it fails future robustness and has a high estimated probability of requiring another intervention. The critic names ALT-D as the stronger surviving alternative, and the final recommendation is ALT-D.
 
 ---
 
@@ -250,6 +248,12 @@ Use:
 
 ```bash
 PYTHONPATH=backend python scripts/run_flagship.py
+PYTHONPATH=backend python scripts/run_agent_flagship.py
 ```
 
-The runner resets the engine before execution and reports a machine-readable summary at the end.
+The first runner proves the deterministic engine lifecycle. The second exercises the actual agent/coplilot API path and proves critic, approval, verification, and rejection/reassessment behavior. Both reset the synthetic scenario before execution.
+
+
+## 15. Post-verification monitoring
+
+The deterministic runner verifies ALT-D successfully at T+32. It then advances the synthetic world to T+35 to demonstrate the monitoring concept. In the current scenario, network stress remains high at that later point, so the runner explicitly reports that reassessment should be triggered. This is a deliberate distinction between **“the intervention was verified at T+32”** and **“the environment remains stable indefinitely.”**

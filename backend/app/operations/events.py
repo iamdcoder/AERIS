@@ -1,14 +1,16 @@
-"""Canonical operational event model for AERIS Phase 3A."""
+"""Canonical operational event contracts used by AERIS live data sources."""
 from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class OperationalEventType(str, Enum):
+    """Normalized categories emitted by operational data sources."""
+
     SURVEILLANCE_UPDATE = "SURVEILLANCE_UPDATE"
     WEATHER_UPDATE = "WEATHER_UPDATE"
     SECTOR_CAPACITY_UPDATE = "SECTOR_CAPACITY_UPDATE"
@@ -21,63 +23,62 @@ class OperationalEventType(str, Enum):
     SYSTEM_ALERT = "SYSTEM_ALERT"
 
 
-_VALID_SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+_ALLOWED_SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
 
 class OperationalEvent(BaseModel):
-    event_id: str
-    sequence: int
+    """Stable JSON-friendly event passed between ingestion and AERIS."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(min_length=1)
+    sequence: int = Field(ge=0)
     event_type: OperationalEventType
-    source: str
+    source: str = Field(min_length=1)
     occurred_at: datetime
-
-    simulation_time_min: int | None = None
-
-    entity_type: str
-    entity_id: str
-
+    simulation_time_min: int | None = Field(default=None, ge=0)
+    entity_type: str = Field(min_length=1)
+    entity_id: str = Field(min_length=1)
     severity: str = "INFO"
-
-    payload: dict[str, Any] = {}
-
+    payload: dict[str, Any] = Field(default_factory=dict)
     scenario_id: str | None = None
     correlation_id: str | None = None
 
-    @field_validator("event_id", "entity_type", "entity_id", "source")
-    @classmethod
-    def _not_empty(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError("Field must not be empty")
-        return v
-
-    @field_validator("sequence")
-    @classmethod
-    def _sequence_non_negative(cls, v: int) -> int:
-        if v < 0:
-            raise ValueError("sequence must be >= 0")
-        return v
-
-    @field_validator("simulation_time_min")
-    @classmethod
-    def _sim_time_non_negative(cls, v: int | None) -> int | None:
-        if v is not None and v < 0:
-            raise ValueError("simulation_time_min must be >= 0 when supplied")
-        return v
-
     @field_validator("severity")
     @classmethod
-    def _severity_valid(cls, v: str) -> str:
-        upper = v.upper()
-        if upper not in _VALID_SEVERITIES:
-            raise ValueError(f"severity must be one of {sorted(_VALID_SEVERITIES)}, got '{v}'")
-        return upper
+    def normalize_severity(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in _ALLOWED_SEVERITIES:
+            raise ValueError(
+                "severity must be one of INFO, LOW, MEDIUM, HIGH, CRITICAL"
+            )
+        return normalized
 
-    @field_validator("payload")
+    @field_validator("source", "entity_type", "entity_id")
     @classmethod
-    def _payload_is_dict(cls, v: Any) -> dict:
-        if not isinstance(v, dict):
-            raise ValueError("payload must be a dictionary")
-        return v
+    def normalize_required_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class OperationalStateSnapshot(BaseModel):
+    """Defensive snapshot of the current normalized operational state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=0)
+    last_sequence: int = Field(ge=-1)
+    last_simulation_time_min: int | None = Field(default=None, ge=0)
+
+    entities: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
+    active_disruptions: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    recent_events: list[OperationalEvent] = Field(default_factory=list)
+
+    running: bool = False
+    stop_at_minute: int | None = Field(default=None, ge=0)
+    done: bool = False
+    last_updated_at: datetime | None = None
+    source: str = "SIMULATED_OPERATIONAL_FEED"
+    scenario_id: str = "mumbai_weather_crisis_v2"
 
 
 def make_event(
@@ -95,7 +96,7 @@ def make_event(
     scenario_id: str | None = None,
     correlation_id: str | None = None,
 ) -> OperationalEvent:
-    """Convenience constructor — no business logic."""
+    """Construct an operational event without embedding domain logic."""
     return OperationalEvent(
         event_id=event_id,
         sequence=sequence,

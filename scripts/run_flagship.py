@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """AERIS — Mumbai Monsoon Flagship Runner.
 
-Deterministic, reproducible, offline-safe proof of the full engine lifecycle:
+Deterministic, reproducible, offline-safe proof of the authoritative engine lifecycle:
 
     DISRUPTION → DETECTION → CANDIDATES → VALIDATION → SIMULATION
     → STRESS TEST → DECISION → HUMAN APPROVAL → EXECUTE → VERIFY
@@ -35,7 +35,7 @@ _BACKEND = os.path.join(_REPO_ROOT, "backend")
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
-from app.engine import public  # noqa: E402 — path manipulation above is intentional
+from backend.app.engine import public  # noqa: E402 — path manipulation above is intentional
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ def _run_score_and_critic(
 
     scored = public.score_candidates(candidates)
 
-    _section(T_CRITIC, f"CRITIC / FROZEN DECISION SCORE (snapshot T+{scored[0]['decision_context']['decision_time'] if scored else T_VALIDATE})")
+    _section(T_CRITIC, f"ENGINE RANKING / CHALLENGE PREVIEW (snapshot T+{scored[0]['decision_context']['decision_time'] if scored else T_VALIDATE})")
     ranked_feasible = [item for item in scored if item.get("feasible") is True]
     if not ranked_feasible:
         raise FlagshipAssertionError("No feasible candidate received a decision score")
@@ -378,10 +378,10 @@ def _run_score_and_critic(
         ls = top.get("stress_survival", {}).get("passed", 0)
         rs = runner_up.get("stress_survival", {}).get("passed", 0)
         if rs > ls:
-            _line(f"Critic note       : {runner_up['candidate_id']} has higher resilience "
+            _line(f"Challenge signal  : {runner_up['candidate_id']} has higher resilience "
                   f"({rs}/{STRESS_PROFILE_COUNT} vs {ls}/{STRESS_PROFILE_COUNT})")
         else:
-            _line(f"Critic note       : {top['candidate_id']} leads on score and resilience")
+            _line(f"Challenge signal  : {top['candidate_id']} leads on score and resilience")
 
     return scored, top["candidate_id"], current_t
 
@@ -564,7 +564,13 @@ def run_flagship(*, verbose_json: bool = False) -> dict:
     ver_result, current_t = _run_verify(recommended_id, current_t)
 
     # T+35 Monitoring ─────────────────────────────────────────
-    _, current_t = _run_monitor(current_t)
+    monitoring_state, current_t = _run_monitor(current_t)
+    monitoring_network_delay = _network_delay(monitoring_state)
+    post_verification_reassessment = monitoring_network_delay > 120.0
+    if post_verification_reassessment:
+        _line("Post-verification status: NETWORK STRESS PERSISTS — reassessment should be triggered.")
+    else:
+        _line("Post-verification status: NETWORK STABLE.")
 
     # ── Final result ──────────────────────────────────────────
     top = next((c for c in scored if c["candidate_id"] == recommended_id), scored[0])
@@ -589,6 +595,12 @@ def run_flagship(*, verbose_json: bool = False) -> dict:
         "candidates_feasible": len(feasible_candidates),
         "apply_status": apply_result["status"],
         "final_time_min": current_t,
+        "verification_time_min": T_VERIFY,
+        "post_verification_monitoring": {
+            "time_min": current_t,
+            "network_delay_min": round(monitoring_network_delay, 2),
+            "reassessment_recommended": post_verification_reassessment,
+        },
         "decision_context": top.get("decision_context"),
         "flagship_result": "SUCCESS" if ver_result["status"] == "VERIFIED" else "FAILED",
     }

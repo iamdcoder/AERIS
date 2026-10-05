@@ -2,21 +2,17 @@
 
 ## 1. Backend import error
 
-Run from repository root using python module syntax (works on Linux/macOS and Windows without shell-specific `PYTHONPATH` syntax):
+Use the repository root and set `PYTHONPATH=backend`:
 
-```bash
-python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
-```
-
-or:
-
-```bash
-python backend/main.py
+```powershell
+$env:PYTHONPATH="backend"
+uvicorn app.api.app:app --reload
 ```
 
 For the flagship runner:
 
-```bash
+```powershell
+$env:PYTHONPATH="backend"
 python scripts/run_flagship.py
 ```
 

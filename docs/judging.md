@@ -57,17 +57,17 @@ Use the local-vs-network contrast:
 
 ```text
 ALT-A
-Local score 0.92
+Local score ~0.92
 Network +22.03 min
 Stress 0/5
 
 ALT-D
-Local score 0.63
+Local score ~0.66
 Network +12.49 min
 Stress 4/5
 ```
 
-Then explain that the critic challenges the locally attractive candidate before the final recommendation is synthesized.
+The actual copilot flagship proof records ALT-A as the preliminary/local leader, ALT-D as the network leader, and the critic challenging ALT-A before ALT-D is synthesized as the recommendation.
 
 ---
 
@@ -157,3 +157,8 @@ Do not claim:
 - production-scale distributed orchestration.
 
 The project is strongest when its claims remain precise.
+
+
+## Reproducible proof scripts
+
+Use `PYTHONPATH=backend python scripts/run_flagship.py` for the deterministic engine proof and `PYTHONPATH=backend python scripts/run_agent_flagship.py` for the actual agent/coplilot proof. The latter asserts the local-vs-network reversal, critic challenge, approval gate, verification, and rejection/reassessment behavior.

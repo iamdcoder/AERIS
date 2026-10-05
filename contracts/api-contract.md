@@ -26,7 +26,7 @@ POST /apply
 POST /verify
 POST /copilot/investigate
 POST /copilot/recommend
-WS   /ws/airspace
+WS   /ws/operations
 ```
 
 ## Candidate response minimum
