@@ -19,6 +19,7 @@ import Timeline from "./components/Timeline";
 import {
   approveCopilotRun,
   fetchBaseline,
+  healthCheck,
   rejectCopilotRun,
   resetCopilot,
   runCopilotRecommendation,
@@ -72,23 +73,13 @@ function Header({
   phase,
   onRun,
   disabled,
+  backendConnected,
+  hasAgentState,
 }) {
-  const running =
-    phase ===
-    "RUNNING";
-
-  const completed =
-    phase ===
-    "COMPLETE";
-
-  const failed =
-    phase ===
-    "FAILED";
-
-  const waiting =
-    phase ===
-    "WAITING_APPROVAL";
-
+  const running = phase === "RUNNING";
+  const completed = phase === "COMPLETE";
+  const failed = phase === "FAILED";
+  const waiting = phase === "WAITING_APPROVAL";
 
   return (
     <header className="topbar">
@@ -129,15 +120,71 @@ function Header({
 
 
       <div className="header-actions">
+        <div
+          className={`backend-status ${
+            backendConnected === true
+              ? "connected"
+              : backendConnected === false
+                ? "offline"
+                : "checking"
+          }`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            fontSize: "11px",
+            fontWeight: "600",
+            letterSpacing: "0.05em",
+            padding: "4px 8px",
+            borderRadius: "4px",
+            backgroundColor:
+              backendConnected === true
+                ? "rgba(16, 185, 129, 0.12)"
+                : backendConnected === false
+                  ? "rgba(239, 68, 68, 0.12)"
+                  : "rgba(245, 158, 11, 0.12)",
+            color:
+              backendConnected === true
+                ? "#10b981"
+                : backendConnected === false
+                  ? "#ef4444"
+                  : "#f59e0b",
+            border: `1px solid ${
+              backendConnected === true
+                ? "rgba(16, 185, 129, 0.3)"
+                : backendConnected === false
+                  ? "rgba(239, 68, 68, 0.3)"
+                  : "rgba(245, 158, 11, 0.3)"
+            }`,
+          }}
+        >
+          <span
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              backgroundColor: "currentColor",
+            }}
+          />
+          {backendConnected === true
+            ? "BACKEND CONNECTED"
+            : backendConnected === false
+              ? "BACKEND OFFLINE"
+              : "CHECKING BACKEND..."}
+        </div>
+
         <div className="system-state">
           <span />
 
           {running
             ? "ORCHESTRATING"
-            : phase ===
-                "WAITING_APPROVAL"
+            : waiting
               ? "WAITING HUMAN"
-              : mode}
+              : completed
+                ? "VERIFIED"
+                : failed
+                  ? "FAILED"
+                  : "SIMULATION READY"}
         </div>
 
 
@@ -153,13 +200,9 @@ function Header({
         >
           {running
             ? "AERIS RUNNING..."
-            : waiting
-              ? "DECISION READY"
-              : completed
-                ? "RERUN AERIS"
-                : failed
-                  ? "RETRY AERIS"
-                  : "RUN AERIS"}
+            : (hasAgentState || waiting || completed || failed)
+              ? "RERUN AERIS"
+              : "RUN AERIS"}
         </button>
       </div>
     </header>
@@ -357,72 +400,65 @@ function ErrorBanner({
     return null;
   }
 
+  const lines = String(message).split("\n").filter(Boolean);
 
   return (
     <section className="error-banner">
       <div>
         <strong>
-          AERIS BACKEND ERROR
+          AERIS ERROR
         </strong>
 
-        <span>
-          {message}
-        </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+          {lines.map((line, i) => (
+            <span key={i} style={{ display: "block", opacity: i === 0 ? 1 : 0.8 }}>
+              {line}
+            </span>
+          ))}
+        </div>
       </div>
 
 
-      <button
-        type="button"
-        onClick={
-          onRetry
-        }
-      >
-        RETRY
-      </button>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+        >
+          RETRY
+        </button>
+      )}
     </section>
   );
 }
 
 
 function App() {
-  const [
-    dashboard,
-    setDashboard,
-  ] = useState(
-    null,
-  );
+  const [dashboard, setDashboard] = useState(null);
+  const [agentState, setAgentState] = useState(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [backendConnected, setBackendConnected] = useState(null); // null = checking
 
 
-  const [
-    agentState,
-    setAgentState,
-  ] = useState(
-    null,
-  );
+  // Health check on mount and periodically
+  useEffect(() => {
+    let cancelled = false;
 
+    async function checkHealth() {
+      const res = await healthCheck();
+      if (!cancelled) {
+        setBackendConnected(res.ok);
+      }
+    }
 
-  const [
-    selectedCandidateId,
-    setSelectedCandidateId,
-  ] = useState(
-    null,
-  );
-
-
-  const [
-    busy,
-    setBusy,
-  ] = useState(
-    false,
-  );
-
-
-  const [
-    error,
-    setError,
-  ] = useState(
-    "",
-  );
+    checkHealth();
+    const interval = window.setInterval(checkHealth, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
 
   useEffect(() => {
@@ -474,6 +510,13 @@ function App() {
 
   async function runAeris() {
     if (busy) {
+      return;
+    }
+
+    if (backendConnected === false) {
+      setError(
+        "Backend unavailable.\nEnsure the AERIS backend is running on 127.0.0.1:8000.\nStart backend with: python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000"
+      );
       return;
     }
 
@@ -591,37 +634,34 @@ function App() {
     }
 
 
-    setBusy(
-      true,
-    );
+    if (!agentState?.run_id) {
+      setError("Cannot approve: no active AERIS run_id. Start a new AERIS run first.");
+      return;
+    }
 
+    setBusy(true);
     setError("");
 
 
-    const result =
-      await approveCopilotRun(
-        {
-          run_id:
-            agentState.run_id,
+    const result = await approveCopilotRun({
+      run_id: agentState.run_id,
+      decided_by: "demo_dispatcher",
+    });
 
-          decided_by:
-            "demo_dispatcher",
-        },
-      );
-
-
-    setBusy(
-      false,
-    );
+    setBusy(false);
 
 
     if (!result.ok) {
-      setError(
-        result.error ||
-          "Approval failed.",
-      );
-
-
+      if (result.errorType === "RUN_NOT_FOUND") {
+        // Stale run — clear agent state and tell user
+        setAgentState(null);
+        setError(
+          result.error ||
+          "The AERIS run is no longer active. Start a new AERIS run."
+        );
+      } else {
+        setError(result.error || "Approval failed.");
+      }
       return;
     }
 
@@ -681,40 +721,35 @@ function App() {
     }
 
 
-    setBusy(
-      true,
-    );
+    if (!agentState?.run_id) {
+      setError("Cannot reject: no active AERIS run_id. Start a new AERIS run first.");
+      return;
+    }
 
+    setBusy(true);
     setError("");
 
 
-    const result =
-      await rejectCopilotRun(
-        {
-          run_id:
-            agentState.run_id,
+    const result = await rejectCopilotRun({
+      run_id: agentState.run_id,
+      reason: cleanReason,
+      decided_by: "demo_dispatcher",
+    });
 
-          reason:
-            cleanReason,
-
-          decided_by:
-            "demo_dispatcher",
-        },
-      );
-
-
-    setBusy(
-      false,
-    );
+    setBusy(false);
 
 
     if (!result.ok) {
-      setError(
-        result.error ||
-          "Recommendation rejection failed.",
-      );
-
-
+      if (result.errorType === "RUN_NOT_FOUND") {
+        // Stale run — clear agent state and tell user
+        setAgentState(null);
+        setError(
+          result.error ||
+          "The AERIS run is no longer active. Start a new AERIS run."
+        );
+      } else {
+        setError(result.error || "Recommendation rejection failed.");
+      }
       return;
     }
 
@@ -858,18 +893,12 @@ function App() {
   return (
     <div className="app-shell">
       <Header
-        mode={
-          dashboard.mode
-        }
-        phase={
-          phase
-        }
-        onRun={
-          runAeris
-        }
-        disabled={
-          busy
-        }
+        mode={dashboard.mode}
+        phase={phase}
+        onRun={runAeris}
+        disabled={busy}
+        backendConnected={backendConnected}
+        hasAgentState={Boolean(agentState)}
       />
 
 

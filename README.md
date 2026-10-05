@@ -383,16 +383,25 @@ The current application is REST-driven. The WebSocket address is retained as a p
 
 From the repository root:
 
+Linux / macOS:
+
 ```bash
-PYTHONPATH=backend uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-Windows PowerShell alternative:
+Windows (PowerShell / CMD):
 
 ```powershell
-$env:PYTHONPATH="backend"
-uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
 ```
+
+Alternative (all operating systems):
+
+```bash
+python backend/main.py
+```
+
+> **Note:** Run the backend as a single process (`workers=1`). The hackathon copilot run state is currently stored in-memory by `run_id`.
 
 The backend should be available at:
 

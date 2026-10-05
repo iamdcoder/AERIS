@@ -6,16 +6,22 @@ The `backend/` directory contains the FastAPI transport layer, domain models, de
 
 From the repository root:
 
+Linux / macOS:
 ```bash
-PYTHONPATH=backend uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-Windows PowerShell:
-
+Windows (PowerShell / CMD):
 ```powershell
-$env:PYTHONPATH="backend"
-uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
 ```
+
+Alternative (all OS):
+```bash
+python backend/main.py
+```
+
+Note: Run the backend as a single worker process (`workers=1`, default) because hackathon copilot run state is maintained in-memory by `run_id`.
 
 FastAPI docs:
 

@@ -15,7 +15,7 @@ The recommended demo length is approximately four to six minutes.
 Start the backend:
 
 ```bash
-PYTHONPATH=backend uvicorn app.api.app:app --reload
+python -m uvicorn backend.app.api.app:app --host 127.0.0.1 --port 8000
 ```
 
 Start the frontend:
