@@ -30,4 +30,4 @@ contracts/
 
 ## Current transport note
 
-`api-contract.md` includes the current `WS /ws/operations` interface. The backend streams the normalized operational replay, while REST remains the fallback transport.
+`api-contract.md` includes a planned `WS /ws/airspace` interface. The current backend source does not implement a WebSocket route yet; REST is the implemented transport.

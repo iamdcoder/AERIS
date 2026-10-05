@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import health, airspace, decisions, copilot, operations
+from .routes import health, airspace, decisions, copilot, websocket
 
 
 def create_app() -> FastAPI:
@@ -16,7 +16,7 @@ def create_app() -> FastAPI:
             "The engine is authoritative; the API is an orchestration/transport layer. "
             "No safety-critical logic lives here."
         ),
-        version="0.1.0",
+        version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
     )
@@ -25,7 +25,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -40,8 +40,8 @@ def create_app() -> FastAPI:
     # Copilot / AI orchestration endpoints
     app.include_router(copilot.router, tags=["copilot"])
 
-    # Live operational replay / normalized event stream.
-    app.include_router(operations.router, tags=["operations"])
+    # Realtime simulated airspace stream.
+    app.include_router(websocket.router, tags=["realtime"])
 
     return app
 

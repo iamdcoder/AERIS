@@ -78,15 +78,17 @@ Current local example:
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-### `VITE_OPERATIONS_WS_URL`
+### `VITE_WS_URL`
 
-Optional explicit WebSocket URL for the live operational feed. In normal Vite development the browser derives `/ws/operations` from the current host, so this can remain empty.
+Planned WebSocket URL.
 
-Example for a separately deployed API server:
+Current example:
 
 ```text
-VITE_OPERATIONS_WS_URL=wss://example-host.example/ws/operations
+VITE_WS_URL=ws://127.0.0.1:8000/ws/airspace
 ```
+
+The current uploaded source does not expose the backend WebSocket route, so this variable should be treated as a forward-looking configuration value until streaming support is implemented.
 
 ---
 

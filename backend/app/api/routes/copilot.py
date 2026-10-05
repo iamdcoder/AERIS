@@ -96,14 +96,6 @@ def _run_orchestrator(
         body.decision_time_min,
     )
 
-    try:
-        from ...operations import get_replay_controller
-        get_replay_controller().sync_current_engine()
-    except Exception:
-        # The operational feed is observability/demo infrastructure; it must
-        # never prevent the authoritative copilot decision from running.
-        pass
-
     scenario_id = (
         body.scenario_id
         or FLAGSHIP_SCENARIO_ID

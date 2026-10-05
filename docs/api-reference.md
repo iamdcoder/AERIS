@@ -244,7 +244,7 @@ The copilot layer also returns structured internal tool errors and records them 
 
 ## 7. API contract note
 
-`contracts/api-contract.md` is the shared interface document. The current live operational transport is `WS /ws/operations`, with REST polling at `GET /operations/live` as a fallback.
+`contracts/api-contract.md` is a shared interface document. It describes the long-term contract surface, including a `/ws/airspace` WebSocket interface.
 
 The current uploaded backend source does not yet register a WebSocket route, so **REST is the currently implemented transport**.
 

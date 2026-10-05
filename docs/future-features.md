@@ -1,29 +1,14 @@
-# Future Features
+# Future Features — Not Core Hackathon Scope
 
-The current hackathon build includes a deterministic live operational replay and live WebSocket/polling transport.
+Possible later extensions:
 
-The next production-facing extensions are:
+- public-data adapters
+- real NOTAM integration
+- live weather feeds
+- richer airline network rotations
+- audit report generation
+- historical replay
+- multi-dispatcher collaboration
+- voice interface
 
-- authorized airline/AAI operational-data adapters;
-- aviation weather adapters;
-- NOTAM/restriction adapters;
-- persistent operational state;
-- authenticated WebSocket sessions;
-- event replay persistence and audit history;
-- richer airline network effects such as rotations, crew and passenger connections;
-- confidence and uncertainty propagation from source data;
-- multi-dispatcher collaboration.
-
-The important architectural seam already exists:
-
-```text
-source adapter
-    ↓
-OperationalEvent
-    ↓
-OperationalStateStore
-    ↓
-AERIS engine / copilot
-```
-
-The hackathon replay is therefore a controlled stand-in for future authorized production feeds rather than a claim of direct access to those systems.
+Do not add these until the core decision loop is rock solid.
